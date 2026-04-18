@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -9,6 +10,16 @@ import (
 	"github.com/elpdev/chatui/internal/session"
 	"github.com/elpdev/chatui/internal/store"
 )
+
+const BodyEncodingContactUpdate = "contact-update-v1"
+
+type IncomingResult struct {
+	Duplicate      bool
+	Control        bool
+	PeerAccountID  string
+	Body           string
+	ContactUpdated *identity.Contact
+}
 
 type Service struct {
 	store    *store.ClientStore
@@ -75,16 +86,89 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) ([]protocol.E
 		}
 		return nil, err
 	}
-	return session.Encrypt(s.identity, contact, body)
+	chatEnvelopes, err := session.Encrypt(s.identity, contact, body)
+	if err != nil {
+		return nil, err
+	}
+	updateEnvelopes, err := s.contactUpdateEnvelopes(contact)
+	if err != nil {
+		return nil, err
+	}
+	return append(updateEnvelopes, chatEnvelopes...), nil
 }
 
-func (s *Service) DecryptIncoming(envelope protocol.Envelope) (string, error) {
+func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, error) {
+	seen, err := s.store.HasSeenEnvelope(s.identity, envelope.ID)
+	if err != nil {
+		return nil, err
+	}
+	if seen {
+		return &IncomingResult{Duplicate: true}, nil
+	}
+	if err := s.store.MarkEnvelopeSeen(s.identity, envelope.ID); err != nil {
+		return nil, err
+	}
+
 	contact, err := s.store.LoadContactByDeviceMailbox(envelope.SenderMailbox)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return "", fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
+			return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
 		}
-		return "", err
+		return nil, err
 	}
-	return session.Decrypt(s.identity, contact, envelope)
+
+	if envelope.BodyEncoding == BodyEncodingContactUpdate {
+		updated, err := s.applyContactUpdate(contact, envelope)
+		if err != nil {
+			return nil, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: updated.AccountID, ContactUpdated: updated}, nil
+	}
+
+	body, err := session.Decrypt(s.identity, contact, envelope)
+	if err != nil {
+		return nil, err
+	}
+	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body}, nil
+}
+
+func (s *Service) contactUpdateEnvelopes(contact *identity.Contact) ([]protocol.Envelope, error) {
+	currentDevice, err := s.identity.CurrentDevice()
+	if err != nil {
+		return nil, err
+	}
+	bundleBytes, err := json.Marshal(s.identity.InviteBundle())
+	if err != nil {
+		return nil, fmt.Errorf("encode contact update bundle: %w", err)
+	}
+	devices := contact.ActiveDevices()
+	envelopes := make([]protocol.Envelope, 0, len(devices))
+	for _, device := range devices {
+		envelopes = append(envelopes, protocol.Envelope{
+			SenderMailbox:    currentDevice.Mailbox,
+			RecipientMailbox: device.Mailbox,
+			BodyEncoding:     BodyEncodingContactUpdate,
+			Body:             string(bundleBytes),
+		})
+	}
+	return envelopes, nil
+}
+
+func (s *Service) applyContactUpdate(existing *identity.Contact, envelope protocol.Envelope) (*identity.Contact, error) {
+	var bundle identity.InviteBundle
+	if err := json.Unmarshal([]byte(envelope.Body), &bundle); err != nil {
+		return nil, fmt.Errorf("decode contact update bundle: %w", err)
+	}
+	updated, err := identity.ContactFromInvite(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if existing.Fingerprint() != updated.Fingerprint() || existing.AccountID != updated.AccountID {
+		return nil, fmt.Errorf("contact update does not match stored identity for sender %s", envelope.SenderMailbox)
+	}
+	updated.Verified = existing.Verified
+	if err := s.store.SaveContact(updated); err != nil {
+		return nil, err
+	}
+	return updated, nil
 }

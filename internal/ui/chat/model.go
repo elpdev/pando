@@ -192,16 +192,28 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		}
 	case protocol.MessageTypeIncoming:
 		if msg.Incoming != nil {
-			body, err := m.messaging.DecryptIncoming(*msg.Incoming)
+			result, err := m.messaging.HandleIncoming(*msg.Incoming)
 			if err != nil {
-				m.status = fmt.Sprintf("decrypt failed: %v", err)
+				m.status = fmt.Sprintf("incoming message failed: %v", err)
 				return
 			}
-			if err := m.messaging.SaveReceived(msg.Incoming.SenderMailbox, body, msg.Incoming.Timestamp); err != nil {
+			if result == nil || result.Duplicate {
+				return
+			}
+			if result.ContactUpdated != nil && result.ContactUpdated.AccountID == m.recipientMailbox {
+				m.peerFingerprint = result.ContactUpdated.Fingerprint()
+				m.peerVerified = result.ContactUpdated.Verified
+				m.status = fmt.Sprintf("updated device bundle for %s", result.ContactUpdated.AccountID)
+				return
+			}
+			if result.Control {
+				return
+			}
+			if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, msg.Incoming.Timestamp); err != nil {
 				m.status = fmt.Sprintf("save history failed: %v", err)
 			}
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
-			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, body))
+			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
 			m.syncViewport()
 		}
 	case protocol.MessageTypeError:

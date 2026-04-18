@@ -33,19 +33,7 @@ func (s *ClientStore) LoadHistory(id *identity.Identity, peerMailbox string) ([]
 	if len(bytes) < 12 {
 		return nil, fmt.Errorf("history file is too short")
 	}
-	block, err := aes.NewCipher(historyKey(id))
-	if err != nil {
-		return nil, fmt.Errorf("create history cipher: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, fmt.Errorf("create history AEAD: %w", err)
-	}
-	nonceSize := gcm.NonceSize()
-	if len(bytes) < nonceSize {
-		return nil, fmt.Errorf("history file is missing nonce")
-	}
-	plaintext, err := gcm.Open(nil, bytes[:nonceSize], bytes[nonceSize:], nil)
+	plaintext, err := decryptStorePayload(id, bytes)
 	if err != nil {
 		return nil, fmt.Errorf("decrypt history: %w", err)
 	}
@@ -69,20 +57,11 @@ func (s *ClientStore) AppendHistory(id *identity.Identity, record MessageRecord)
 	if err != nil {
 		return fmt.Errorf("encode history: %w", err)
 	}
-	block, err := aes.NewCipher(historyKey(id))
+	sealed, err := encryptStorePayload(id, plaintext)
 	if err != nil {
-		return fmt.Errorf("create history cipher: %w", err)
+		return fmt.Errorf("encrypt history: %w", err)
 	}
-	gcm, err := cipher.NewGCM(block)
-	if err != nil {
-		return fmt.Errorf("create history AEAD: %w", err)
-	}
-	nonce := make([]byte, gcm.NonceSize())
-	if _, err := rand.Read(nonce); err != nil {
-		return fmt.Errorf("generate history nonce: %w", err)
-	}
-	sealed := gcm.Seal(nil, nonce, plaintext, nil)
-	return os.WriteFile(s.historyPath(record.PeerMailbox), append(nonce, sealed...), 0o600)
+	return os.WriteFile(s.historyPath(record.PeerMailbox), sealed, 0o600)
 }
 
 func (s *ClientStore) historyPath(peerMailbox string) string {
@@ -93,4 +72,40 @@ func (s *ClientStore) historyPath(peerMailbox string) string {
 func historyKey(id *identity.Identity) []byte {
 	sum := sha256.Sum256(append([]byte("chatui-history-v1"), id.AccountSigningPrivate...))
 	return sum[:]
+}
+
+func encryptStorePayload(id *identity.Identity, plaintext []byte) ([]byte, error) {
+	block, err := aes.NewCipher(historyKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("create store cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create store AEAD: %w", err)
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate store nonce: %w", err)
+	}
+	return append(nonce, gcm.Seal(nil, nonce, plaintext, nil)...), nil
+}
+
+func decryptStorePayload(id *identity.Identity, bytes []byte) ([]byte, error) {
+	block, err := aes.NewCipher(historyKey(id))
+	if err != nil {
+		return nil, fmt.Errorf("create store cipher: %w", err)
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, fmt.Errorf("create store AEAD: %w", err)
+	}
+	nonceSize := gcm.NonceSize()
+	if len(bytes) < nonceSize {
+		return nil, fmt.Errorf("store payload is missing nonce")
+	}
+	plaintext, err := gcm.Open(nil, bytes[:nonceSize], bytes[nonceSize:], nil)
+	if err != nil {
+		return nil, err
+	}
+	return plaintext, nil
 }

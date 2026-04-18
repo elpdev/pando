@@ -14,6 +14,8 @@ Current scope:
 - Contact fingerprint display and explicit verification flow
 - Optional relay auth tokens for private deployments
 - Trusted device enrollment, listing, and revocation
+- Automatic contact device-bundle refresh during normal messaging
+- Duplicate suppression for replayed relay envelopes
 
 ## Project Shape
 
@@ -96,5 +98,4 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 
 ## Current Limitations
 
-- Contact device updates still depend on re-importing an updated invite bundle
 - No automatic history sync to newly enrolled devices
