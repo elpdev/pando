@@ -54,6 +54,7 @@ The relay is packaged to fit ONCE's expected runtime shape.
 
 Container behavior:
 
+- serves a landing page at `/`
 - serves HTTP on port `80`
 - exposes a healthcheck endpoint at `/up`
 - stores durable relay state in `/storage/relay.db`
