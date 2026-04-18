@@ -36,6 +36,9 @@ func (s *ClientStore) LoadIdentity() (*identity.Identity, error) {
 func (s *ClientStore) LoadOrCreateIdentity(mailbox string) (*identity.Identity, bool, error) {
 	id, err := s.LoadIdentity()
 	if err == nil {
+		if currentMailbox, currentErr := id.CurrentMailbox(); currentErr == nil && currentMailbox != mailbox {
+			return nil, false, fmt.Errorf("store belongs to device mailbox %q, not %q", currentMailbox, mailbox)
+		}
 		return id, false, nil
 	}
 	if !errors.Is(err, ErrNotFound) {
@@ -67,7 +70,7 @@ func (s *ClientStore) SaveContact(contact *identity.Contact) error {
 	if err != nil {
 		return err
 	}
-	contacts[contact.Mailbox] = *contact
+	contacts[contact.AccountID] = *contact
 	return s.writeJSON(s.contactsPath(), contacts, 0o600)
 }
 
@@ -93,7 +96,7 @@ func (s *ClientStore) ListContacts() ([]identity.Contact, error) {
 	for _, contact := range contacts {
 		list = append(list, contact)
 	}
-	sort.Slice(list, func(i, j int) bool { return list[i].Mailbox < list[j].Mailbox })
+	sort.Slice(list, func(i, j int) bool { return list[i].AccountID < list[j].AccountID })
 	return list, nil
 }
 
@@ -115,12 +118,56 @@ func (s *ClientStore) MarkContactVerified(mailbox string, verified bool) (*ident
 	return &copyContact, nil
 }
 
+func (s *ClientStore) LoadContactByDeviceMailbox(mailbox string) (*identity.Contact, error) {
+	contacts, err := s.loadContactsMap()
+	if err != nil {
+		return nil, err
+	}
+	for _, contact := range contacts {
+		if _, deviceErr := contact.DeviceByMailbox(mailbox); deviceErr == nil {
+			copyContact := contact
+			return &copyContact, nil
+		}
+	}
+	return nil, ErrNotFound
+}
+
+func (s *ClientStore) SavePendingEnrollment(pending *identity.PendingEnrollment) error {
+	if err := s.Ensure(); err != nil {
+		return err
+	}
+	return s.writeJSON(s.pendingEnrollmentPath(), pending, 0o600)
+}
+
+func (s *ClientStore) LoadPendingEnrollment() (*identity.PendingEnrollment, error) {
+	var pending identity.PendingEnrollment
+	if err := s.readJSON(s.pendingEnrollmentPath(), &pending); err != nil {
+		return nil, err
+	}
+	return &pending, nil
+}
+
+func (s *ClientStore) ClearPendingEnrollment() error {
+	err := os.Remove(s.pendingEnrollmentPath())
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("remove %s: %w", s.pendingEnrollmentPath(), err)
+	}
+	return nil
+}
+
 func (s *ClientStore) identityPath() string {
 	return filepath.Join(s.dir, "identity.json")
 }
 
 func (s *ClientStore) contactsPath() string {
 	return filepath.Join(s.dir, "contacts.json")
+}
+
+func (s *ClientStore) pendingEnrollmentPath() string {
+	return filepath.Join(s.dir, "pending-enrollment.json")
 }
 
 func (s *ClientStore) loadContactsMap() (map[string]identity.Contact, error) {

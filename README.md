@@ -13,6 +13,7 @@ Current scope:
 - Client reconnect with backoff after relay disconnects
 - Contact fingerprint display and explicit verification flow
 - Optional relay auth tokens for private deployments
+- Trusted device enrollment, listing, and revocation
 
 ## Project Shape
 
@@ -63,6 +64,21 @@ go run ./cmd/chatuictl list-contacts --mailbox alice
 go run ./cmd/chatuictl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
 
+Enroll a second trusted device for Alice:
+
+```bash
+go run ./cmd/chatuictl create-enrollment --account alice --mailbox alice-phone --out /tmp/alice-phone-request.json
+go run ./cmd/chatuictl approve-enrollment --mailbox alice --request /tmp/alice-phone-request.json --out /tmp/alice-phone-approval.json
+go run ./cmd/chatuictl complete-enrollment --mailbox alice-phone --approval /tmp/alice-phone-approval.json
+go run ./cmd/chatuictl list-devices --mailbox alice
+```
+
+Revoke a trusted device:
+
+```bash
+go run ./cmd/chatuictl revoke-device --mailbox alice --device alice-phone
+```
+
 Open one terminal for Alice:
 
 ```bash
@@ -80,4 +96,5 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 
 ## Current Limitations
 
-- No trusted multi-device enrollment or revocation yet
+- Contact device updates still depend on re-importing an updated invite bundle
+- No automatic history sync to newly enrolled devices

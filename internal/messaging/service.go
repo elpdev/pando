@@ -20,6 +20,9 @@ func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	if err := id.Validate(); err != nil {
+		return nil, false, err
+	}
 	return &Service{store: store, identity: id}, created, nil
 }
 
@@ -29,6 +32,17 @@ func (s *Service) Identity() *identity.Identity {
 
 func (s *Service) Contact(mailbox string) (*identity.Contact, error) {
 	return s.store.LoadContact(mailbox)
+}
+
+func (s *Service) Devices() ([]identity.Device, error) {
+	if err := s.identity.Validate(); err != nil {
+		return nil, err
+	}
+	devices := make([]identity.Device, 0, len(s.identity.Devices))
+	for _, device := range s.identity.Devices {
+		devices = append(devices, device)
+	}
+	return devices, nil
 }
 
 func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
@@ -53,22 +67,22 @@ func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time) er
 	})
 }
 
-func (s *Service) EncryptOutgoing(recipientMailbox, body string) (protocol.Envelope, error) {
-	contact, err := s.store.LoadContact(recipientMailbox)
+func (s *Service) EncryptOutgoing(recipientAccountID, body string) ([]protocol.Envelope, error) {
+	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return protocol.Envelope{}, fmt.Errorf("no contact for mailbox %q; import an invite first", recipientMailbox)
+			return nil, fmt.Errorf("no contact for account %q; import an updated invite first", recipientAccountID)
 		}
-		return protocol.Envelope{}, err
+		return nil, err
 	}
 	return session.Encrypt(s.identity, contact, body)
 }
 
 func (s *Service) DecryptIncoming(envelope protocol.Envelope) (string, error) {
-	contact, err := s.store.LoadContact(envelope.SenderMailbox)
+	contact, err := s.store.LoadContactByDeviceMailbox(envelope.SenderMailbox)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return "", fmt.Errorf("no contact for sender mailbox %q", envelope.SenderMailbox)
+			return "", fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
 		}
 		return "", err
 	}

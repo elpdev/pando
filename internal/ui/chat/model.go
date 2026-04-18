@@ -114,7 +114,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.status = "relay is not connected; waiting to reconnect"
 				return m, nil
 			}
-			envelope, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
+			envelopes, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
 				m.status = err.Error()
 				return m, nil
@@ -122,7 +122,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
 			m.input.SetValue("")
 			m.syncViewport()
-			return m, m.sendCmd(body, envelope)
+			return m, m.sendCmd(body, envelopes)
 		}
 	case clientEventMsg:
 		event := transport.Event(msg)
@@ -262,9 +262,14 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) sendCmd(body string, envelope protocol.Envelope) tea.Cmd {
+func (m *Model) sendCmd(body string, envelopes []protocol.Envelope) tea.Cmd {
 	return func() tea.Msg {
-		return sendResultMsg{body: body, err: m.client.Send(envelope)}
+		for _, envelope := range envelopes {
+			if err := m.client.Send(envelope); err != nil {
+				return sendResultMsg{body: body, err: err}
+			}
+		}
+		return sendResultMsg{body: body}
 	}
 }
 

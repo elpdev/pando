@@ -13,33 +13,43 @@ import (
 
 const BodyEncodingBox = "box-sealed-v1"
 
-func Encrypt(sender *identity.Identity, recipient *identity.Contact, plaintext string) (protocol.Envelope, error) {
+func Encrypt(sender *identity.Identity, recipient *identity.Contact, plaintext string) ([]protocol.Envelope, error) {
+	currentDevice, err := sender.CurrentDevice()
+	if err != nil {
+		return nil, err
+	}
 	senderPub, senderPriv, err := sender.EncryptionKeyPair()
 	if err != nil {
-		return protocol.Envelope{}, err
+		return nil, err
 	}
-	recipientPub, err := bytesToKey(recipient.DeviceEncryptionPublic)
-	if err != nil {
-		return protocol.Envelope{}, fmt.Errorf("recipient encryption key: %w", err)
+	devices := recipient.ActiveDevices()
+	if len(devices) == 0 {
+		return nil, fmt.Errorf("contact %s has no active devices", recipient.AccountID)
 	}
-
-	var nonce [24]byte
-	if _, err := rand.Read(nonce[:]); err != nil {
-		return protocol.Envelope{}, fmt.Errorf("generate nonce: %w", err)
+	envelopes := make([]protocol.Envelope, 0, len(devices))
+	for _, device := range devices {
+		recipientPub, err := bytesToKey(device.EncryptionPublic)
+		if err != nil {
+			return nil, fmt.Errorf("recipient encryption key: %w", err)
+		}
+		var nonce [24]byte
+		if _, err := rand.Read(nonce[:]); err != nil {
+			return nil, fmt.Errorf("generate nonce: %w", err)
+		}
+		ciphertext := box.Seal(nil, []byte(plaintext), &nonce, recipientPub, senderPriv)
+		envelope := protocol.Envelope{
+			SenderMailbox:                currentDevice.Mailbox,
+			RecipientMailbox:             device.Mailbox,
+			BodyEncoding:                 BodyEncodingBox,
+			Ciphertext:                   base64.StdEncoding.EncodeToString(ciphertext),
+			Nonce:                        base64.StdEncoding.EncodeToString(nonce[:]),
+			SenderDeviceSigningPublic:    base64.StdEncoding.EncodeToString(currentDevice.SigningPublic),
+			SenderDeviceEncryptionPublic: base64.StdEncoding.EncodeToString(senderPub[:]),
+		}
+		envelope.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(currentDevice.SigningPrivate, signingBytes(envelope)))
+		envelopes = append(envelopes, envelope)
 	}
-
-	ciphertext := box.Seal(nil, []byte(plaintext), &nonce, recipientPub, senderPriv)
-	envelope := protocol.Envelope{
-		SenderMailbox:                sender.Mailbox,
-		RecipientMailbox:             recipient.Mailbox,
-		BodyEncoding:                 BodyEncodingBox,
-		Ciphertext:                   base64.StdEncoding.EncodeToString(ciphertext),
-		Nonce:                        base64.StdEncoding.EncodeToString(nonce[:]),
-		SenderDeviceSigningPublic:    base64.StdEncoding.EncodeToString(sender.DeviceSigningPublic),
-		SenderDeviceEncryptionPublic: base64.StdEncoding.EncodeToString(senderPub[:]),
-	}
-	envelope.Signature = base64.StdEncoding.EncodeToString(ed25519.Sign(sender.DeviceSigningPrivate, signingBytes(envelope)))
-	return envelope, nil
+	return envelopes, nil
 }
 
 func Decrypt(recipient *identity.Identity, sender *identity.Contact, envelope protocol.Envelope) (string, error) {
@@ -49,20 +59,24 @@ func Decrypt(recipient *identity.Identity, sender *identity.Contact, envelope pr
 	if envelope.BodyEncoding != BodyEncodingBox {
 		return "", fmt.Errorf("unsupported body encoding %q", envelope.BodyEncoding)
 	}
-	if envelope.SenderMailbox != sender.Mailbox {
-		return "", fmt.Errorf("sender mailbox mismatch")
+	senderDevice, err := sender.DeviceByMailbox(envelope.SenderMailbox)
+	if err != nil {
+		return "", err
 	}
-	if envelope.SenderDeviceSigningPublic != base64.StdEncoding.EncodeToString(sender.DeviceSigningPublic) {
-		return "", fmt.Errorf("sender signing key does not match stored contact")
+	if senderDevice.Revoked {
+		return "", fmt.Errorf("sender device %s is revoked", senderDevice.Mailbox)
 	}
-	if envelope.SenderDeviceEncryptionPublic != base64.StdEncoding.EncodeToString(sender.DeviceEncryptionPublic) {
-		return "", fmt.Errorf("sender encryption key does not match stored contact")
+	if envelope.SenderDeviceSigningPublic != base64.StdEncoding.EncodeToString(senderDevice.SigningPublic) {
+		return "", fmt.Errorf("sender signing key does not match stored contact device")
+	}
+	if envelope.SenderDeviceEncryptionPublic != base64.StdEncoding.EncodeToString(senderDevice.EncryptionPublic) {
+		return "", fmt.Errorf("sender encryption key does not match stored contact device")
 	}
 	signature, err := base64.StdEncoding.DecodeString(envelope.Signature)
 	if err != nil {
 		return "", fmt.Errorf("decode signature: %w", err)
 	}
-	if !ed25519.Verify(sender.DeviceSigningPublic, signingBytes(envelope), signature) {
+	if !ed25519.Verify(senderDevice.SigningPublic, signingBytes(envelope), signature) {
 		return "", fmt.Errorf("invalid message signature")
 	}
 	nonceBytes, err := base64.StdEncoding.DecodeString(envelope.Nonce)
@@ -80,7 +94,7 @@ func Decrypt(recipient *identity.Identity, sender *identity.Contact, envelope pr
 	if err != nil {
 		return "", err
 	}
-	senderPub, err := bytesToKey(sender.DeviceEncryptionPublic)
+	senderPub, err := bytesToKey(senderDevice.EncryptionPublic)
 	if err != nil {
 		return "", fmt.Errorf("sender encryption key: %w", err)
 	}
