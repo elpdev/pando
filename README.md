@@ -1,4 +1,4 @@
-# pando
+# Pando
 
 <picture>
   <source srcset="internal/relay/logo.webp" type="image/webp">
