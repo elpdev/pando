@@ -43,6 +43,26 @@ Start the client:
 pando
 ```
 
+### Storage location
+
+By default, Pando stores all local data under `~/.pando`:
+
+- client state: `~/.pando/clients/<mailbox>/`
+- relay state: `~/.pando/relay/relay.db`
+
+You can override the shared storage root with `-root-dir`, which is useful if you want to keep your chats and relay data on a removable drive:
+
+```bash
+pandoctl init --mailbox alice --root-dir /media/usb/pando
+pando --mailbox alice --to bob --root-dir /media/usb/pando
+pando-relay --root-dir /media/usb/pando
+```
+
+More specific overrides still win when needed:
+
+- `pando` and `pandoctl`: `-data-dir`
+- `pando-relay`: `-store`
+
 ### Relay configuration
 
 Relay settings can be set via flags or environment variables — useful for container deployments:
