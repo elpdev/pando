@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/protocol"
 )
 
 func TestValidateEnvelopeLimitsRejectsOversizedPayload(t *testing.T) {

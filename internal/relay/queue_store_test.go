@@ -4,7 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/protocol"
 )
 
 func TestBoltQueueStorePersistsBacklog(t *testing.T) {

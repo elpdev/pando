@@ -6,7 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 func (s *ClientStore) HasSeenEnvelope(id *identity.Identity, envelopeID string) (bool, error) {

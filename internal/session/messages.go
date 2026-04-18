@@ -6,8 +6,8 @@ import (
 	"encoding/base64"
 	"fmt"
 
-	"github.com/elpdev/chatui/internal/identity"
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/protocol"
 	"github.com/google/uuid"
 	"golang.org/x/crypto/nacl/box"
 )

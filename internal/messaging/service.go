@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/elpdev/chatui/internal/identity"
-	"github.com/elpdev/chatui/internal/protocol"
-	"github.com/elpdev/chatui/internal/session"
-	"github.com/elpdev/chatui/internal/store"
+	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/session"
+	"github.com/elpdev/pando/internal/store"
 )
 
 const BodyEncodingContactUpdate = "contact-update-v1"

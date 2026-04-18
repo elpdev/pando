@@ -6,17 +6,17 @@ import (
 	"os"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/elpdev/chatui/internal/config"
-	"github.com/elpdev/chatui/internal/messaging"
-	"github.com/elpdev/chatui/internal/store"
-	"github.com/elpdev/chatui/internal/transport/ws"
-	"github.com/elpdev/chatui/internal/ui"
-	"github.com/elpdev/chatui/internal/ui/chat"
+	"github.com/elpdev/pando/internal/config"
+	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/store"
+	"github.com/elpdev/pando/internal/transport/ws"
+	"github.com/elpdev/pando/internal/ui"
+	"github.com/elpdev/pando/internal/ui/chat"
 )
 
 func Execute(args []string) error {
 	cfg := config.DefaultClient()
-	fs := flag.NewFlagSet("chatui", flag.ContinueOnError)
+	fs := flag.NewFlagSet("pando", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.RelayURL, "relay", cfg.RelayURL, "relay websocket URL")
 	fs.StringVar(&cfg.RelayToken, "relay-token", cfg.RelayToken, "relay auth token")

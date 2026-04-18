@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/protocol"
 )
 
 type Options struct {

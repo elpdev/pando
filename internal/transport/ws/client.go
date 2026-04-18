@@ -7,12 +7,12 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elpdev/chatui/internal/protocol"
-	"github.com/elpdev/chatui/internal/transport"
+	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/transport"
 	"github.com/gorilla/websocket"
 )
 
-const authHeader = "X-Chatui-Relay-Token"
+const authHeader = "X-Pando-Relay-Token"
 
 type Client struct {
 	url     string

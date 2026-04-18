@@ -82,15 +82,15 @@ func (r Relay) Validate() error {
 func ClientDataDir(mailbox string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".chatui", mailbox)
+		return filepath.Join(".", ".pando", mailbox)
 	}
-	return filepath.Join(home, ".local", "share", "chatui", mailbox)
+	return filepath.Join(home, ".local", "share", "pando", mailbox)
 }
 
 func RelayStorePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".chatui", "relay.db")
+		return filepath.Join(".", ".pando", "relay.db")
 	}
-	return filepath.Join(home, ".local", "share", "chatui", "relay.db")
+	return filepath.Join(home, ".local", "share", "pando", "relay.db")
 }

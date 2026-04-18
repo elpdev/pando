@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 type MessageRecord struct {
@@ -104,7 +104,7 @@ func (s *ClientStore) historyPath(peerMailbox string) string {
 }
 
 func historyKey(id *identity.Identity) []byte {
-	sum := sha256.Sum256(append([]byte("chatui-history-v1"), id.AccountSigningPrivate...))
+	sum := sha256.Sum256(append([]byte("pando-history-v1"), id.AccountSigningPrivate...))
 	return sum[:]
 }
 

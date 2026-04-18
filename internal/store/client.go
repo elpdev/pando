@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 var ErrNotFound = errors.New("not found")

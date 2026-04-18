@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/protocol"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

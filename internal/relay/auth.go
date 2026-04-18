@@ -1,3 +1,3 @@
 package relay
 
-const authHeader = "X-Chatui-Relay-Token"
+const authHeader = "X-Pando-Relay-Token"

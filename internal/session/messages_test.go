@@ -3,7 +3,7 @@ package session
 import (
 	"testing"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 func TestEncryptDecryptRoundTrip(t *testing.T) {

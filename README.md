@@ -1,4 +1,4 @@
-# chatui
+# pando
 
 First vertical slice for a terminal-native chat client and relay in Go.
 
@@ -20,9 +20,9 @@ Current scope:
 
 ## Project Shape
 
-- `cmd/chatui`: thin client entrypoint
-- `cmd/chatui-relay`: thin relay entrypoint
-- `cmd/chatuictl`: local identity and contact management
+- `cmd/pando`: thin client entrypoint
+- `cmd/pando-relay`: thin relay entrypoint
+- `cmd/pandoctl`: local identity and contact management
 - `internal/clientcmd`: client startup and flag wiring
 - `internal/ctlcmd`: control command wiring
 - `internal/relaycmd`: relay startup and flag wiring
@@ -44,55 +44,55 @@ Current scope:
 Start the relay:
 
 ```bash
-go run ./cmd/chatui-relay
+go run ./cmd/pando-relay
 ```
 
 Optional hardening flags:
 
 ```bash
-go run ./cmd/chatui-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120 --auth-token secret-token
+go run ./cmd/pando-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120 --auth-token secret-token
 ```
 
 Initialize Alice and Bob locally and exchange invites:
 
 ```bash
-go run ./cmd/chatuictl --help
-go run ./cmd/chatuictl init --mailbox alice
-go run ./cmd/chatuictl init --mailbox bob
-go run ./cmd/chatuictl export-invite --mailbox alice --out /tmp/alice-invite.json
-go run ./cmd/chatuictl export-invite --mailbox bob --out /tmp/bob-invite.json
-go run ./cmd/chatuictl import-contact --mailbox alice --invite /tmp/bob-invite.json
-go run ./cmd/chatuictl import-contact --mailbox bob --invite /tmp/alice-invite.json
-go run ./cmd/chatuictl list-contacts --mailbox alice
-go run ./cmd/chatuictl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
+go run ./cmd/pandoctl --help
+go run ./cmd/pandoctl init --mailbox alice
+go run ./cmd/pandoctl init --mailbox bob
+go run ./cmd/pandoctl export-invite --mailbox alice --out /tmp/alice-invite.json
+go run ./cmd/pandoctl export-invite --mailbox bob --out /tmp/bob-invite.json
+go run ./cmd/pandoctl import-contact --mailbox alice --invite /tmp/bob-invite.json
+go run ./cmd/pandoctl import-contact --mailbox bob --invite /tmp/alice-invite.json
+go run ./cmd/pandoctl list-contacts --mailbox alice
+go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
 
 Enroll a second trusted device for Alice:
 
 ```bash
-go run ./cmd/chatuictl create-enrollment --account alice --mailbox alice-phone --out /tmp/alice-phone-request.json
-go run ./cmd/chatuictl approve-enrollment --mailbox alice --request /tmp/alice-phone-request.json --out /tmp/alice-phone-approval.json
-go run ./cmd/chatuictl complete-enrollment --mailbox alice-phone --approval /tmp/alice-phone-approval.json
-go run ./cmd/chatuictl list-devices --mailbox alice
+go run ./cmd/pandoctl create-enrollment --account alice --mailbox alice-phone --out /tmp/alice-phone-request.json
+go run ./cmd/pandoctl approve-enrollment --mailbox alice --request /tmp/alice-phone-request.json --out /tmp/alice-phone-approval.json
+go run ./cmd/pandoctl complete-enrollment --mailbox alice-phone --approval /tmp/alice-phone-approval.json
+go run ./cmd/pandoctl list-devices --mailbox alice
 ```
 
 Revoke a trusted device:
 
 ```bash
-go run ./cmd/chatuictl revoke-device --mailbox alice --device alice-phone
+go run ./cmd/pandoctl revoke-device --mailbox alice --device alice-phone
 ```
 
 Open one terminal for Alice:
 
 ```bash
-go run ./cmd/chatui --mailbox alice --to bob
-go run ./cmd/chatui --mailbox alice --to bob --relay-token secret-token
+go run ./cmd/pando --mailbox alice --to bob
+go run ./cmd/pando --mailbox alice --to bob --relay-token secret-token
 ```
 
 Open another terminal for Bob:
 
 ```bash
-go run ./cmd/chatui --mailbox bob --to alice
+go run ./cmd/pando --mailbox bob --to alice
 ```
 
 If Bob is offline when Alice sends a message, the relay will keep that ciphertext in its local queue store and deliver it when Bob subscribes.

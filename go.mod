@@ -1,4 +1,4 @@
-module github.com/elpdev/chatui
+module github.com/elpdev/pando
 
 go 1.26.2
 

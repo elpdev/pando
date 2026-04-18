@@ -3,7 +3,7 @@ package store
 import (
 	"testing"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 func TestMarkContactVerified(t *testing.T) {

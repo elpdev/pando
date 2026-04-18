@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/elpdev/chatui/internal/identity"
+	"github.com/elpdev/pando/internal/identity"
 )
 
 func TestEncryptedHistoryRoundTrip(t *testing.T) {

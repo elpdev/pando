@@ -6,14 +6,14 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/elpdev/chatui/internal/config"
-	"github.com/elpdev/chatui/internal/identity"
-	"github.com/elpdev/chatui/internal/store"
+	"github.com/elpdev/pando/internal/config"
+	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/store"
 )
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: chatuictl <init|show-identity|export-invite|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device> [flags]")
+		return fmt.Errorf("usage: pandoctl <init|show-identity|export-invite|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device> [flags]")
 	}
 
 	switch args[0] {

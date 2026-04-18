@@ -5,7 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/elpdev/chatui/internal/ui/chat"
+	"github.com/elpdev/pando/internal/ui/chat"
 )
 
 type App struct {
@@ -47,7 +47,7 @@ func (a *App) View() string {
 		return "loading..."
 	}
 
-	header := lipgloss.NewStyle().Bold(true).Render("chatui  mailbox=" + a.chat.Mailbox() + "  to=" + a.chat.RecipientMailbox())
+	header := lipgloss.NewStyle().Bold(true).Render("pando  mailbox=" + a.chat.Mailbox() + "  to=" + a.chat.RecipientMailbox())
 	status := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(a.chat.Status())
 
 	return strings.Join([]string{header, status, a.chat.View()}, "\n")

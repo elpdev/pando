@@ -3,7 +3,7 @@ package transport
 import (
 	"context"
 
-	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/elpdev/pando/internal/protocol"
 )
 
 type Event struct {

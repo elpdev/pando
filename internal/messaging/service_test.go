@@ -3,8 +3,8 @@ package messaging
 import (
 	"testing"
 
-	"github.com/elpdev/chatui/internal/identity"
-	"github.com/elpdev/chatui/internal/store"
+	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/store"
 )
 
 func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {

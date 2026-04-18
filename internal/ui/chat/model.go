@@ -9,9 +9,9 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/elpdev/chatui/internal/messaging"
-	"github.com/elpdev/chatui/internal/protocol"
-	"github.com/elpdev/chatui/internal/transport"
+	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/transport"
 )
 
 type Deps struct {
