@@ -60,7 +60,7 @@ brews:
     ids: [pando-archive]
     repository:
       owner: elpdev
-      name: homebrew-pando
+      name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     commit_author:
       name: goreleaserbot
