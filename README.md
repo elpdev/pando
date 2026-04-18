@@ -1,8 +1,8 @@
-# pando
+# Pando
 
 <picture>
-  <source srcset="docs/images/pando.webp" type="image/webp">
-  <img src="docs/images/pando.webp" alt="Pando banner" width="100%">
+  <source srcset="internal/relay/logo.webp" type="image/webp">
+  <img src="internal/relay/logo.webp" alt="Pando" width="160">
 </picture>
 
 Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through a network of self-hosted relays.

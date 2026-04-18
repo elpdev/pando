@@ -94,6 +94,11 @@
       align-items: center;
       gap: 16px;
     }
+    .masthead-logo {
+      width: 24px;
+      height: 24px;
+      opacity: 0.9;
+    }
     .masthead-name {
       color: var(--phosphor);
       font-weight: 700;
@@ -107,7 +112,15 @@
 
     /* ---- Hero ---- */
     .hero {
-      padding: 56px 0 0;
+      padding: 48px 0 0;
+    }
+    .hero-logo {
+      display: block;
+      width: 96px;
+      height: 96px;
+      margin-bottom: 28px;
+      opacity: 0.92;
+      filter: drop-shadow(0 0 18px rgba(159,232,176,0.25));
     }
     .hero-boot {
       font-size: 0.7rem;
@@ -475,6 +488,7 @@
     <!-- Masthead -->
     <div class="masthead">
       <div class="masthead-left">
+        <img src="/logo.webp" alt="Pando" class="masthead-logo">
         <span class="masthead-name">PANDO</span>
         <span class="masthead-status">[ ONLINE ]</span>
       </div>
@@ -483,6 +497,7 @@
 
     <!-- Hero -->
     <section class="hero">
+      <img src="/logo.webp" alt="Pando" class="hero-logo">
       <p class="hero-boot">&gt; secure channel ready<span class="cursor">_</span></p>
       <h1>
         <span class="h1-glow">SPEAK</span><br>

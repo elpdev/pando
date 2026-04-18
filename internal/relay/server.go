@@ -18,6 +18,9 @@ import (
 //go:embed landing.html
 var landingHTML string
 
+//go:embed logo.webp
+var logoWebP []byte
+
 type Server struct {
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
@@ -69,10 +72,17 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleLanding)
+	mux.HandleFunc("/logo.webp", s.handleLogo)
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/up", s.handleHealth)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	return mux
+}
+
+func (s *Server) handleLogo(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "image/webp")
+	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	_, _ = w.Write(logoWebP)
 }
 
 func (s *Server) handleLanding(w http.ResponseWriter, r *http.Request) {
