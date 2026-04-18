@@ -17,13 +17,28 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Compute release tag
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Compute next semver tag
         id: version
+        shell: bash
         run: |
-          ts="$(date -u +'%Y%m%d-%H%M%S')"
-          short_sha="${GITHUB_SHA::7}"
-          echo "tag=release-${ts}-${short_sha}" >> "$GITHUB_OUTPUT"
+          latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
+          if [[ -z "$latest_tag" ]]; then
+            next_tag="v0.1.0"
+          else
+            version="${latest_tag#v}"
+            IFS='.' read -r major minor patch <<< "$version"
+            next_patch=$((patch + 1))
+            next_tag="v${major}.${minor}.${next_patch}"
+          fi
+          echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
 
       - name: Create git tag
         env:
@@ -35,6 +50,45 @@ jobs:
             -f ref="refs/tags/${{ steps.version.outputs.tag }}" \
             -f sha="${GITHUB_SHA}"
 
+      - name: Build release binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          version="${{ steps.version.outputs.tag }}"
+
+          build_unix() {
+            local goos="$1"
+            local goarch="$2"
+            local archive="pando_${version#v}_${goos}_${goarch}.tar.gz"
+            local outdir="dist/pando_${version#v}_${goos}_${goarch}"
+            mkdir -p "$outdir"
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando" ./cmd/pando
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando-relay" ./cmd/pando-relay
+            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pandoctl" ./cmd/pandoctl
+            tar -C "$outdir" -czf "dist/$archive" .
+            rm -rf "$outdir"
+          }
+
+          build_windows() {
+            local goarch="$1"
+            local archive="pando_${version#v}_windows_${goarch}.zip"
+            local outdir="dist/pando_${version#v}_windows_${goarch}"
+            mkdir -p "$outdir"
+            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando.exe" ./cmd/pando
+            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando-relay.exe" ./cmd/pando-relay
+            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pandoctl.exe" ./cmd/pandoctl
+            (cd "$outdir" && zip -q -r "../$archive" .)
+            rm -rf "$outdir"
+          }
+
+          build_unix linux amd64
+          build_unix linux arm64
+          build_unix darwin amd64
+          build_unix darwin arm64
+          build_windows amd64
+          build_windows arm64
+
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -43,6 +97,15 @@ jobs:
             --target "${GITHUB_SHA}" \
             --title "${{ steps.version.outputs.tag }}" \
             --notes "Automated release for ${GITHUB_SHA}."
+
+      - name: Upload release binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${{ steps.version.outputs.tag }}" dist/*
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -70,6 +133,7 @@ jobs:
         with:
           context: .
           file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

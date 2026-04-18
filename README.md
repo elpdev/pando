@@ -70,13 +70,19 @@ On GitHub, every push to `main` also publishes the relay image automatically to 
 
 - `ghcr.io/elpdev/pando-relay:latest`
 - `ghcr.io/elpdev/pando-relay:main`
-- `ghcr.io/elpdev/pando-relay:release-<utc-timestamp>-<shortsha>`
+- `ghcr.io/elpdev/pando-relay:vX.Y.Z`
 - `ghcr.io/elpdev/pando-relay:sha-<commit>`
 
 Every push to `main` also creates:
 
-- a git tag named `release-<utc-timestamp>-<shortsha>`
+- a semver git tag such as `v0.1.0`, `v0.1.1`, `v0.1.2`
 - a matching GitHub Release
+- attached release binaries for Linux, macOS, and Windows
+
+The relay image is published as a multi-arch container for:
+
+- `linux/amd64`
+- `linux/arm64`
 
 Run it locally like ONCE would:
 
