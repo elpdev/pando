@@ -16,9 +16,12 @@ import (
 )
 
 type MessageRecord struct {
+	MessageID   string    `json:"message_id,omitempty"`
 	PeerMailbox string    `json:"peer_mailbox"`
 	Direction   string    `json:"direction"`
 	Body        string    `json:"body"`
+	Delivered   bool      `json:"delivered,omitempty"`
+	DeliveredAt time.Time `json:"delivered_at,omitempty"`
 	Timestamp   time.Time `json:"timestamp"`
 }
 
@@ -62,6 +65,37 @@ func (s *ClientStore) AppendHistory(id *identity.Identity, record MessageRecord)
 		return fmt.Errorf("encrypt history: %w", err)
 	}
 	return os.WriteFile(s.historyPath(record.PeerMailbox), sealed, 0o600)
+}
+
+func (s *ClientStore) MarkHistoryDelivered(id *identity.Identity, peerMailbox, messageID string, deliveredAt time.Time) error {
+	if messageID == "" {
+		return nil
+	}
+	records, err := s.LoadHistory(id, peerMailbox)
+	if err != nil {
+		return err
+	}
+	updated := false
+	for idx := range records {
+		if records[idx].Direction != "outbound" || records[idx].MessageID != messageID {
+			continue
+		}
+		records[idx].Delivered = true
+		records[idx].DeliveredAt = deliveredAt
+		updated = true
+	}
+	if !updated {
+		return nil
+	}
+	plaintext, err := json.MarshalIndent(records, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode history: %w", err)
+	}
+	sealed, err := encryptStorePayload(id, plaintext)
+	if err != nil {
+		return fmt.Errorf("encrypt history: %w", err)
+	}
+	return os.WriteFile(s.historyPath(peerMailbox), sealed, 0o600)
 }
 
 func (s *ClientStore) historyPath(peerMailbox string) string {

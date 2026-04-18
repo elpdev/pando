@@ -8,6 +8,7 @@ import (
 
 	"github.com/elpdev/chatui/internal/identity"
 	"github.com/elpdev/chatui/internal/protocol"
+	"github.com/google/uuid"
 	"golang.org/x/crypto/nacl/box"
 )
 
@@ -26,6 +27,7 @@ func Encrypt(sender *identity.Identity, recipient *identity.Contact, plaintext s
 	if len(devices) == 0 {
 		return nil, fmt.Errorf("contact %s has no active devices", recipient.AccountID)
 	}
+	clientMessageID := uuid.NewString()
 	envelopes := make([]protocol.Envelope, 0, len(devices))
 	for _, device := range devices {
 		recipientPub, err := bytesToKey(device.EncryptionPublic)
@@ -38,6 +40,7 @@ func Encrypt(sender *identity.Identity, recipient *identity.Contact, plaintext s
 		}
 		ciphertext := box.Seal(nil, []byte(plaintext), &nonce, recipientPub, senderPriv)
 		envelope := protocol.Envelope{
+			ClientMessageID:              clientMessageID,
 			SenderMailbox:                currentDevice.Mailbox,
 			RecipientMailbox:             device.Mailbox,
 			BodyEncoding:                 BodyEncodingBox,

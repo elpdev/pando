@@ -38,11 +38,11 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 		t.Fatalf("complete bob enrollment: %v", err)
 	}
 
-	envelopes, err := aliceService.EncryptOutgoing("bob", "hello after update")
+	batch, err := aliceService.EncryptOutgoing("bob", "hello after update")
 	if err != nil {
 		t.Fatalf("encrypt outgoing: %v", err)
 	}
-	if len(envelopes) == 0 || envelopes[0].BodyEncoding != BodyEncodingContactUpdate {
+	if batch == nil || len(batch.Envelopes) == 0 || batch.Envelopes[0].BodyEncoding != BodyEncodingContactUpdate {
 		t.Fatalf("expected first outgoing envelope to be a contact update")
 	}
 
@@ -56,7 +56,7 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	}
 	bobService := &Service{store: bobStore, identity: bobUpdated}
 
-	result, err := bobService.HandleIncoming(envelopes[0])
+	result, err := bobService.HandleIncoming(batch.Envelopes[0])
 	if err != nil {
 		t.Fatalf("handle incoming contact update: %v", err)
 	}
@@ -85,11 +85,11 @@ func TestHandleIncomingSkipsDuplicateEnvelopeIDs(t *testing.T) {
 	if err := aliceStore.SaveContact(bobContact); err != nil {
 		t.Fatalf("save bob contact: %v", err)
 	}
-	envelopes, err := aliceService.EncryptOutgoing("bob", "hello bob")
+	batch, err := aliceService.EncryptOutgoing("bob", "hello bob")
 	if err != nil {
 		t.Fatalf("encrypt outgoing: %v", err)
 	}
-	chatEnvelope := envelopes[len(envelopes)-1]
+	chatEnvelope := batch.Envelopes[len(batch.Envelopes)-1]
 	chatEnvelope.ID = "dup-1"
 
 	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
@@ -118,5 +118,69 @@ func TestHandleIncomingSkipsDuplicateEnvelopeIDs(t *testing.T) {
 	}
 	if second == nil || !second.Duplicate {
 		t.Fatalf("expected second delivery to be marked duplicate")
+	}
+}
+
+func TestDeliveryAckMarksSentHistoryDelivered(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	batch, err := aliceService.EncryptOutgoing("bob", "needs ack")
+	if err != nil {
+		t.Fatalf("encrypt outgoing: %v", err)
+	}
+	if batch == nil || batch.MessageID == "" {
+		t.Fatalf("expected outgoing batch message id")
+	}
+	if err := aliceService.SaveSent("bob", batch.MessageID, "needs ack"); err != nil {
+		t.Fatalf("save sent: %v", err)
+	}
+	chatEnvelope := batch.Envelopes[len(batch.Envelopes)-1]
+	chatEnvelope.ID = "relay-msg-1"
+
+	result, err := bobService.HandleIncoming(chatEnvelope)
+	if err != nil {
+		t.Fatalf("handle incoming chat: %v", err)
+	}
+	if result == nil || len(result.AckEnvelopes) != 1 {
+		t.Fatalf("expected one delivery ack envelope")
+	}
+	ackEnvelope := result.AckEnvelopes[0]
+	ackEnvelope.ID = "relay-ack-1"
+	ackResult, err := aliceService.HandleIncoming(ackEnvelope)
+	if err != nil {
+		t.Fatalf("handle delivery ack: %v", err)
+	}
+	if ackResult == nil || !ackResult.Control {
+		t.Fatalf("expected delivery ack to be treated as control")
+	}
+	history, err := aliceService.History("bob")
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(history) != 1 || !history[0].Delivered {
+		t.Fatalf("expected sent history to be marked delivered: %+v", history)
 	}
 }

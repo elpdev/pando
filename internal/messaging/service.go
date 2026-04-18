@@ -12,13 +12,26 @@ import (
 )
 
 const BodyEncodingContactUpdate = "contact-update-v1"
+const BodyEncodingDeliveryAck = "delivery-ack-v1"
+
+type deliveryAck struct {
+	MessageID   string    `json:"message_id"`
+	DeliveredAt time.Time `json:"delivered_at"`
+}
 
 type IncomingResult struct {
 	Duplicate      bool
 	Control        bool
 	PeerAccountID  string
 	Body           string
+	MessageID      string
 	ContactUpdated *identity.Contact
+	AckEnvelopes   []protocol.Envelope
+}
+
+type OutgoingBatch struct {
+	MessageID string
+	Envelopes []protocol.Envelope
 }
 
 type Service struct {
@@ -60,8 +73,9 @@ func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
 	return s.store.LoadHistory(s.identity, peerMailbox)
 }
 
-func (s *Service) SaveSent(peerMailbox, body string) error {
+func (s *Service) SaveSent(peerMailbox, messageID, body string) error {
 	return s.store.AppendHistory(s.identity, store.MessageRecord{
+		MessageID:   messageID,
 		PeerMailbox: peerMailbox,
 		Direction:   "outbound",
 		Body:        body,
@@ -78,7 +92,11 @@ func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time) er
 	})
 }
 
-func (s *Service) EncryptOutgoing(recipientAccountID, body string) ([]protocol.Envelope, error) {
+func (s *Service) MarkDelivered(peerMailbox, messageID string, deliveredAt time.Time) error {
+	return s.store.MarkHistoryDelivered(s.identity, peerMailbox, messageID, deliveredAt)
+}
+
+func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBatch, error) {
 	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
 		if err == store.ErrNotFound {
@@ -94,7 +112,11 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) ([]protocol.E
 	if err != nil {
 		return nil, err
 	}
-	return append(updateEnvelopes, chatEnvelopes...), nil
+	messageID := ""
+	if len(chatEnvelopes) > 0 {
+		messageID = chatEnvelopes[0].ClientMessageID
+	}
+	return &OutgoingBatch{MessageID: messageID, Envelopes: append(updateEnvelopes, chatEnvelopes...)}, nil
 }
 
 func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, error) {
@@ -124,12 +146,26 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		}
 		return &IncomingResult{Control: true, PeerAccountID: updated.AccountID, ContactUpdated: updated}, nil
 	}
+	if envelope.BodyEncoding == BodyEncodingDeliveryAck {
+		ack, err := s.parseDeliveryAck(envelope)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.MarkDelivered(contact.AccountID, ack.MessageID, ack.DeliveredAt); err != nil {
+			return nil, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, nil
+	}
 
 	body, err := session.Decrypt(s.identity, contact, envelope)
 	if err != nil {
 		return nil, err
 	}
-	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body}, nil
+	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
+	if err != nil {
+		return nil, err
+	}
+	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body, MessageID: envelope.ClientMessageID, AckEnvelopes: ackEnvelopes}, nil
 }
 
 func (s *Service) contactUpdateEnvelopes(contact *identity.Contact) ([]protocol.Envelope, error) {
@@ -171,4 +207,33 @@ func (s *Service) applyContactUpdate(existing *identity.Contact, envelope protoc
 		return nil, err
 	}
 	return updated, nil
+}
+
+func (s *Service) deliveryAckEnvelopes(envelope protocol.Envelope) ([]protocol.Envelope, error) {
+	if envelope.ClientMessageID == "" {
+		return nil, nil
+	}
+	currentDevice, err := s.identity.CurrentDevice()
+	if err != nil {
+		return nil, err
+	}
+	ackBody, err := json.Marshal(deliveryAck{MessageID: envelope.ClientMessageID, DeliveredAt: time.Now().UTC()})
+	if err != nil {
+		return nil, fmt.Errorf("encode delivery ack: %w", err)
+	}
+	return []protocol.Envelope{{SenderMailbox: currentDevice.Mailbox, RecipientMailbox: envelope.SenderMailbox, BodyEncoding: BodyEncodingDeliveryAck, Body: string(ackBody)}}, nil
+}
+
+func (s *Service) parseDeliveryAck(envelope protocol.Envelope) (*deliveryAck, error) {
+	var ack deliveryAck
+	if err := json.Unmarshal([]byte(envelope.Body), &ack); err != nil {
+		return nil, fmt.Errorf("decode delivery ack: %w", err)
+	}
+	if ack.MessageID == "" {
+		return nil, fmt.Errorf("delivery ack message id is required")
+	}
+	if ack.DeliveredAt.IsZero() {
+		ack.DeliveredAt = time.Now().UTC()
+	}
+	return &ack, nil
 }

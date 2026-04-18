@@ -16,6 +16,7 @@ const (
 
 type Envelope struct {
 	ID                           string    `json:"id"`
+	ClientMessageID              string    `json:"client_message_id,omitempty"`
 	SenderMailbox                string    `json:"sender_mailbox"`
 	RecipientMailbox             string    `json:"recipient_mailbox"`
 	Body                         string    `json:"body,omitempty"`

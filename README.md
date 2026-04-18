@@ -16,6 +16,7 @@ Current scope:
 - Trusted device enrollment, listing, and revocation
 - Automatic contact device-bundle refresh during normal messaging
 - Duplicate suppression for replayed relay envelopes
+- Delivery acknowledgements reflected in local chat history
 
 ## Project Shape
 
@@ -99,3 +100,4 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 ## Current Limitations
 
 - No automatic history sync to newly enrolled devices
+- Delivery state is message-level only; no per-device breakdown or read receipts yet

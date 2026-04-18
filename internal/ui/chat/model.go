@@ -45,8 +45,9 @@ type Model struct {
 type clientEventMsg transport.Event
 type reconnectResultMsg struct{ err error }
 type sendResultMsg struct {
-	body string
-	err  error
+	messageID string
+	body      string
+	err       error
 }
 
 func New(deps Deps) *Model {
@@ -77,14 +78,10 @@ func New(deps Deps) *Model {
 		input:            input,
 		viewport:         vp,
 		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
-		messages: []string{
-			fmt.Sprintf("Encrypted chat ready. Target mailbox: %s", deps.RecipientMailbox),
-			fmt.Sprintf("Your fingerprint: %s", deps.Messaging.Identity().Fingerprint()),
-			fmt.Sprintf("Peer fingerprint: %s (%s)", peerFingerprint, verificationLabel(peerVerified)),
-		},
-		connecting:      true,
-		peerFingerprint: peerFingerprint,
-		peerVerified:    peerVerified,
+		messages:         initialMessages(deps.RecipientMailbox, deps.Messaging.Identity().Fingerprint(), peerFingerprint, peerVerified),
+		connecting:       true,
+		peerFingerprint:  peerFingerprint,
+		peerVerified:     peerVerified,
 	}
 }
 
@@ -114,7 +111,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.status = "relay is not connected; waiting to reconnect"
 				return m, nil
 			}
-			envelopes, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
+			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
 				m.status = err.Error()
 				return m, nil
@@ -122,7 +119,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
 			m.input.SetValue("")
 			m.syncViewport()
-			return m, m.sendCmd(body, envelopes)
+			return m, m.sendCmd(body, batch)
 		}
 	case clientEventMsg:
 		event := transport.Event(msg)
@@ -149,7 +146,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.status = fmt.Sprintf("send failed: %v", msg.err)
 			return m, nil
 		}
-		if err := m.messaging.SaveSent(m.recipientMailbox, msg.body); err != nil {
+		if err := m.messaging.SaveSent(m.recipientMailbox, msg.messageID, msg.body); err != nil {
 			m.status = fmt.Sprintf("save history failed: %v", err)
 		}
 		return m, nil
@@ -207,6 +204,11 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 				return
 			}
 			if result.Control {
+				if result.MessageID != "" {
+					m.loadHistory()
+					m.syncViewport()
+					m.status = fmt.Sprintf("delivery acknowledged for %s", result.MessageID)
+				}
 				return
 			}
 			if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, msg.Incoming.Timestamp); err != nil {
@@ -215,6 +217,14 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
 			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
 			m.syncViewport()
+			if len(result.AckEnvelopes) != 0 {
+				for _, envelope := range result.AckEnvelopes {
+					if err := m.client.Send(envelope); err != nil {
+						m.status = fmt.Sprintf("delivery ack failed: %v", err)
+						break
+					}
+				}
+			}
 		}
 	case protocol.MessageTypeError:
 		if msg.Error != nil {
@@ -274,18 +284,22 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) sendCmd(body string, envelopes []protocol.Envelope) tea.Cmd {
+func (m *Model) sendCmd(body string, batch *messaging.OutgoingBatch) tea.Cmd {
 	return func() tea.Msg {
-		for _, envelope := range envelopes {
+		if batch == nil {
+			return sendResultMsg{body: body}
+		}
+		for _, envelope := range batch.Envelopes {
 			if err := m.client.Send(envelope); err != nil {
-				return sendResultMsg{body: body, err: err}
+				return sendResultMsg{messageID: batch.MessageID, body: body, err: err}
 			}
 		}
-		return sendResultMsg{body: body}
+		return sendResultMsg{messageID: batch.MessageID, body: body}
 	}
 }
 
 func (m *Model) loadHistory() {
+	m.messages = initialMessages(m.recipientMailbox, m.messaging.Identity().Fingerprint(), m.peerFingerprint, m.peerVerified)
 	records, err := m.messaging.History(m.recipientMailbox)
 	if err != nil {
 		m.status = fmt.Sprintf("load history failed: %v", err)
@@ -294,10 +308,22 @@ func (m *Model) loadHistory() {
 	for _, record := range records {
 		ts := record.Timestamp.Format(time.Kitchen)
 		if record.Direction == "outbound" {
-			m.messages = append(m.messages, fmt.Sprintf("[%s] you -> %s: %s", ts, m.recipientMailbox, record.Body))
+			status := "pending"
+			if record.Delivered {
+				status = "delivered"
+			}
+			m.messages = append(m.messages, fmt.Sprintf("[%s] you -> %s [%s]: %s", ts, m.recipientMailbox, status, record.Body))
 			continue
 		}
 		m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, record.PeerMailbox, m.mailbox, record.Body))
+	}
+}
+
+func initialMessages(recipientMailbox, ownFingerprint, peerFingerprint string, peerVerified bool) []string {
+	return []string{
+		fmt.Sprintf("Encrypted chat ready. Target mailbox: %s", recipientMailbox),
+		fmt.Sprintf("Your fingerprint: %s", ownFingerprint),
+		fmt.Sprintf("Peer fingerprint: %s (%s)", peerFingerprint, verificationLabel(peerVerified)),
 	}
 }
 
