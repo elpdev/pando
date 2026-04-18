@@ -21,6 +21,7 @@ func Execute(args []string) error {
 	fs := flag.NewFlagSet("pando-relay", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "HTTP listen address")
+	fs.StringVar(&cfg.RootDir, "root-dir", cfg.RootDir, "root directory for Pando storage")
 	fs.StringVar(&cfg.StorePath, "store", cfg.StorePath, "path to relay queue store")
 	fs.DurationVar(&cfg.QueueTTL, "ttl", cfg.QueueTTL, "offline message retention TTL")
 	fs.IntVar(&cfg.MaxMessageBytes, "max-message-bytes", cfg.MaxMessageBytes, "maximum accepted message payload size")
@@ -29,6 +30,9 @@ func Execute(args []string) error {
 
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if cfg.StorePath == "" {
+		cfg.StorePath = config.RelayStorePath(cfg.RootDir)
 	}
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid relay config: %w", err)

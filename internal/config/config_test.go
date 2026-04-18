@@ -1,9 +1,36 @@
 package config
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
+
+func TestDefaultRootDirUsesCentralizedPandoRoot(t *testing.T) {
+	t.Setenv("HOME", "/home/tester")
+
+	got := DefaultRootDir()
+	want := filepath.Join("/home/tester", ".pando")
+	if got != want {
+		t.Fatalf("expected root dir %q, got %q", want, got)
+	}
+}
+
+func TestClientDataDirUsesCentralizedPandoRoot(t *testing.T) {
+	got := ClientDataDir(filepath.Join("/media", "flash-drive", "pando-data"), "alice")
+	want := filepath.Join("/media", "flash-drive", "pando-data", "clients", "alice")
+	if got != want {
+		t.Fatalf("expected client data dir %q, got %q", want, got)
+	}
+}
+
+func TestRelayStorePathUsesCentralizedPandoRoot(t *testing.T) {
+	got := RelayStorePath(filepath.Join("/media", "flash-drive", "pando-data"))
+	want := filepath.Join("/media", "flash-drive", "pando-data", "relay", "relay.db")
+	if got != want {
+		t.Fatalf("expected relay store path %q, got %q", want, got)
+	}
+}
 
 func TestDefaultRelayAppliesEnvironmentOverrides(t *testing.T) {
 	cfg := DefaultRelay()
@@ -53,10 +80,10 @@ func TestApplyRelayEnvRejectsInvalidEnvironmentOverrides(t *testing.T) {
 
 func TestApplyRelayEnvRejectsInvalidIntegerEnvironmentOverrides(t *testing.T) {
 	tests := []struct {
-		name    string
-		envKey  string
-		envVal  string
-		prefix  string
+		name   string
+		envKey string
+		envVal string
+		prefix string
 	}{
 		{name: "max message bytes", envKey: "PANDO_RELAY_MAX_MESSAGE_BYTES", envVal: "abc", prefix: "invalid PANDO_RELAY_MAX_MESSAGE_BYTES \"abc\":"},
 		{name: "rate limit", envKey: "PANDO_RELAY_RATE_LIMIT_PER_MINUTE", envVal: "xyz", prefix: "invalid PANDO_RELAY_RATE_LIMIT_PER_MINUTE \"xyz\":"},

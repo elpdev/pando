@@ -12,6 +12,7 @@ import (
 const (
 	DefaultRelayURL  = "ws://localhost:8080/ws"
 	DefaultRelayAddr = ":8080"
+	defaultRootDir   = ".pando"
 )
 
 type Client struct {
@@ -19,11 +20,13 @@ type Client struct {
 	RelayToken       string
 	Mailbox          string
 	RecipientMailbox string
+	RootDir          string
 	DataDir          string
 }
 
 type Relay struct {
 	Addr               string
+	RootDir            string
 	StorePath          string
 	QueueTTL           time.Duration
 	MaxMessageBytes    int
@@ -32,13 +35,13 @@ type Relay struct {
 }
 
 func DefaultClient() Client {
-	return Client{RelayURL: DefaultRelayURL}
+	return Client{RelayURL: DefaultRelayURL, RootDir: DefaultRootDir()}
 }
 
 func DefaultRelay() Relay {
 	return Relay{
 		Addr:               DefaultRelayAddr,
-		StorePath:          RelayStorePath(),
+		RootDir:            DefaultRootDir(),
 		QueueTTL:           24 * time.Hour,
 		MaxMessageBytes:    64 * 1024,
 		RateLimitPerMinute: 120,
@@ -80,20 +83,20 @@ func (r Relay) Validate() error {
 	return nil
 }
 
-func ClientDataDir(mailbox string) string {
+func DefaultRootDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return filepath.Join(".", ".pando", mailbox)
+		return filepath.Join(".", defaultRootDir)
 	}
-	return filepath.Join(home, ".local", "share", "pando", mailbox)
+	return filepath.Join(home, defaultRootDir)
 }
 
-func RelayStorePath() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(".", ".pando", "relay.db")
-	}
-	return filepath.Join(home, ".local", "share", "pando", "relay.db")
+func ClientDataDir(rootDir, mailbox string) string {
+	return filepath.Join(rootDir, "clients", mailbox)
+}
+
+func RelayStorePath(rootDir string) string {
+	return filepath.Join(rootDir, "relay", "relay.db")
 }
 
 func ApplyRelayEnv(cfg *Relay) error {

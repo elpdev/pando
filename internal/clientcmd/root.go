@@ -22,13 +22,14 @@ func Execute(args []string) error {
 	fs.StringVar(&cfg.RelayToken, "relay-token", cfg.RelayToken, "relay auth token")
 	fs.StringVar(&cfg.Mailbox, "mailbox", "", "local mailbox identifier")
 	fs.StringVar(&cfg.RecipientMailbox, "to", "", "recipient mailbox identifier")
+	fs.StringVar(&cfg.RootDir, "root-dir", cfg.RootDir, "root directory for Pando storage")
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "client state directory")
 
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if cfg.DataDir == "" && cfg.Mailbox != "" {
-		cfg.DataDir = config.ClientDataDir(cfg.Mailbox)
+		cfg.DataDir = config.ClientDataDir(cfg.RootDir, cfg.Mailbox)
 	}
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid client config: %w", err)

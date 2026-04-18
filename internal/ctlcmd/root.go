@@ -99,12 +99,13 @@ func runExportInvite(args []string) error {
 	fs := flag.NewFlagSet("export-invite", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	outputPath := fs.String("out", "", "invite output file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -132,12 +133,13 @@ func runInviteCode(args []string) error {
 	fs := flag.NewFlagSet("invite-code", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	copyToClipboard := fs.Bool("copy", false, "copy the invite code to the clipboard")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -174,13 +176,14 @@ func runImportContactWithName(name string, args []string) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	invitePath := fs.String("invite", "", "path to invite bundle JSON")
 	inviteCode := fs.String("code", "", "shareable invite code")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -245,12 +248,13 @@ func runShowContact(args []string) error {
 	fs := flag.NewFlagSet("show-contact", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	contactMailbox := fs.String("contact", "", "contact mailbox identifier")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -274,13 +278,14 @@ func runVerifyContact(args []string) error {
 	fs := flag.NewFlagSet("verify-contact", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	contactMailbox := fs.String("contact", "", "contact mailbox identifier")
 	expectedFingerprint := fs.String("fingerprint", "", "expected contact fingerprint")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -321,12 +326,13 @@ func runCreateEnrollment(args []string) error {
 	fs.SetOutput(os.Stderr)
 	accountID := fs.String("account", "", "stable account identifier")
 	mailbox := fs.String("mailbox", "", "new device mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	outputPath := fs.String("out", "", "enrollment request output file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -360,13 +366,14 @@ func runApproveEnrollment(args []string) error {
 	fs := flag.NewFlagSet("approve-enrollment", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "trusted device mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	requestPath := fs.String("request", "", "path to enrollment request JSON")
 	outputPath := fs.String("out", "", "approval output file")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -411,12 +418,13 @@ func runCompleteEnrollment(args []string) error {
 	fs := flag.NewFlagSet("complete-enrollment", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "new device mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	approvalPath := fs.String("approval", "", "path to approval JSON")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -457,12 +465,13 @@ func runRevokeDevice(args []string) error {
 	fs := flag.NewFlagSet("revoke-device", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "trusted device mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	deviceID := fs.String("device", "", "device id or mailbox to revoke")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -488,12 +497,13 @@ func runEject(args []string) error {
 	fs := flag.NewFlagSet("eject", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	force := fs.Bool("force", false, "skip confirmation prompt")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return err
 	}
@@ -528,23 +538,24 @@ func parseClientFlags(name string, args []string) (string, string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	if err := fs.Parse(args); err != nil {
 		return "", "", err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
 		return "", "", err
 	}
 	return *mailbox, resolvedDataDir, nil
 }
 
-func resolveDataDir(mailbox, dataDir string) (string, error) {
+func resolveDataDir(mailbox, rootDir, dataDir string) (string, error) {
 	if mailbox == "" {
 		return "", fmt.Errorf("-mailbox is required")
 	}
 	if dataDir == "" {
-		return config.ClientDataDir(mailbox), nil
+		return config.ClientDataDir(rootDir, mailbox), nil
 	}
 	return dataDir, nil
 }
