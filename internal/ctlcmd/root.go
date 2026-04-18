@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -136,6 +137,7 @@ func runInviteCode(args []string) error {
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	copyToClipboard := fs.Bool("copy", false, "copy the invite code to the clipboard")
+	rawOutput := fs.Bool("raw", false, "print only the invite code")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -158,9 +160,14 @@ func runInviteCode(args []string) error {
 		}
 		fmt.Printf("copied invite code for %s to clipboard\n", id.AccountID)
 	}
+	if *rawOutput {
+		fmt.Println(code)
+		return nil
+	}
 	fmt.Printf("account: %s\n", id.AccountID)
 	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 	fmt.Printf("invite-code: %s\n", code)
+	fmt.Println("share the invite-code value above, or use --raw / --copy for easier sharing")
 	return nil
 }
 
@@ -180,6 +187,9 @@ func runImportContactWithName(name string, args []string) error {
 	dataDir := fs.String("data-dir", "", "client state directory")
 	invitePath := fs.String("invite", "", "path to invite bundle JSON")
 	inviteCode := fs.String("code", "", "shareable invite code")
+	readStdin := fs.Bool("stdin", false, "read invite code or invite JSON from stdin")
+	readPaste := fs.Bool("paste", false, "read a pasted invite from stdin until EOF")
+	fromClipboard := fs.Bool("from-clipboard", false, "read the invite code from the clipboard")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -187,15 +197,21 @@ func runImportContactWithName(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *invitePath == "" && strings.TrimSpace(*inviteCode) == "" {
-		return fmt.Errorf("either -invite or -code is required")
+	if err := validateInviteInputFlags(*invitePath, *inviteCode, *readStdin, *readPaste, *fromClipboard); err != nil {
+		return err
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
 	_, _, err = clientStore.LoadOrCreateIdentity(*mailbox)
 	if err != nil {
 		return err
 	}
-	bundle, err := readInviteBundle(*invitePath, *inviteCode)
+	bundle, err := readInviteBundle(inviteInputOptions{
+		InvitePath:    *invitePath,
+		InviteCode:    *inviteCode,
+		ReadStdin:     *readStdin,
+		ReadPaste:     *readPaste,
+		ReadClipboard: *fromClipboard,
+	})
 	if err != nil {
 		return err
 	}
@@ -210,6 +226,40 @@ func runImportContactWithName(name string, args []string) error {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
+	return nil
+}
+
+type inviteInputOptions struct {
+	InvitePath    string
+	InviteCode    string
+	ReadStdin     bool
+	ReadPaste     bool
+	ReadClipboard bool
+}
+
+func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPaste, fromClipboard bool) error {
+	inputs := 0
+	if strings.TrimSpace(invitePath) != "" {
+		inputs++
+	}
+	if strings.TrimSpace(inviteCode) != "" {
+		inputs++
+	}
+	if readStdin {
+		inputs++
+	}
+	if readPaste {
+		inputs++
+	}
+	if fromClipboard {
+		inputs++
+	}
+	if inputs == 0 {
+		return fmt.Errorf("provide one of -invite, -code, -stdin, -paste, or -from-clipboard")
+	}
+	if inputs > 1 {
+		return fmt.Errorf("use only one of -invite, -code, -stdin, -paste, or -from-clipboard")
+	}
 	return nil
 }
 
@@ -586,28 +636,70 @@ func decodeInviteCode(code string) (*identity.InviteBundle, error) {
 	return &bundle, nil
 }
 
-func readInviteBundle(invitePath, inviteCode string) (*identity.InviteBundle, error) {
-	if strings.TrimSpace(inviteCode) != "" {
-		return decodeInviteCode(inviteCode)
-	}
-	if invitePath == "-" {
+func readInviteBundle(input inviteInputOptions) (*identity.InviteBundle, error) {
+	switch {
+	case strings.TrimSpace(input.InviteCode) != "":
+		return decodeInviteText(input.InviteCode)
+	case input.ReadClipboard:
+		text, err := clipboard.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read invite from clipboard: %w", err)
+		}
+		return decodeInviteText(text)
+	case input.ReadStdin || input.ReadPaste || input.InvitePath == "-":
+		if input.ReadPaste {
+			fmt.Fprintln(os.Stderr, "paste the invite, then press Ctrl-D when finished:")
+		}
 		bytes, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return nil, fmt.Errorf("read invite from stdin: %w", err)
 		}
-		var bundle identity.InviteBundle
-		if err := json.Unmarshal(bytes, &bundle); err != nil {
-			return nil, fmt.Errorf("decode invite: %w", err)
+		return decodeInviteText(string(bytes))
+	case strings.TrimSpace(input.InvitePath) != "":
+		bytes, err := os.ReadFile(input.InvitePath)
+		if err != nil {
+			return nil, err
 		}
-		return &bundle, nil
+		return decodeInviteText(string(bytes))
+	default:
+		return nil, fmt.Errorf("provide one of -invite, -code, -stdin, -paste, or -from-clipboard")
 	}
-	bytes, err := os.ReadFile(invitePath)
-	if err != nil {
-		return nil, err
+}
+
+func decodeInviteText(text string) (*identity.InviteBundle, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil, fmt.Errorf("invite input is empty")
+	}
+	if bundle, err := decodeInviteCode(extractInviteCode(trimmed)); err == nil {
+		return bundle, nil
 	}
 	var bundle identity.InviteBundle
-	if err := json.Unmarshal(bytes, &bundle); err != nil {
-		return nil, fmt.Errorf("decode invite: %w", err)
+	if err := json.Unmarshal([]byte(trimmed), &bundle); err == nil {
+		return &bundle, nil
 	}
-	return &bundle, nil
+	code := extractInviteCode(trimmed)
+	decoded, err := decodeInviteCode(code)
+	if err == nil {
+		return decoded, nil
+	}
+	return nil, fmt.Errorf("decode invite input: %w; try the value after 'invite-code:' or use pandoctl invite-code --raw", err)
+}
+
+var inviteCodePattern = regexp.MustCompile(`(?m)invite-code:\s*([A-Za-z0-9_-]+)`)
+
+func extractInviteCode(text string) string {
+	if matches := inviteCodePattern.FindStringSubmatch(text); len(matches) == 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, " ") || strings.Contains(line, ":") {
+			continue
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(line); err == nil {
+			return line
+		}
+	}
+	return strings.TrimSpace(text)
 }
