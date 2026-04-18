@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 const (
@@ -131,6 +133,44 @@ func ApplyRelayEnv(cfg *Relay) error {
 		cfg.RateLimitPerMinute = parsed
 	}
 	return nil
+}
+
+// DeviceConfig holds optional device-wide defaults stored in config.yml.
+type DeviceConfig struct {
+	RelayURL       string `yaml:"relay_url,omitempty"`
+	DefaultMailbox string `yaml:"default_mailbox,omitempty"`
+}
+
+func DeviceConfigPath(rootDir string) string {
+	return filepath.Join(rootDir, "config.yml")
+}
+
+// LoadDeviceConfig reads the device config file. Returns an empty config (no error) if the file doesn't exist.
+func LoadDeviceConfig(rootDir string) (DeviceConfig, error) {
+	data, err := os.ReadFile(DeviceConfigPath(rootDir))
+	if os.IsNotExist(err) {
+		return DeviceConfig{}, nil
+	}
+	if err != nil {
+		return DeviceConfig{}, fmt.Errorf("read device config: %w", err)
+	}
+	var cfg DeviceConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return DeviceConfig{}, fmt.Errorf("parse device config: %w", err)
+	}
+	return cfg, nil
+}
+
+// SaveDeviceConfig writes the device config file, creating rootDir if needed.
+func SaveDeviceConfig(rootDir string, cfg DeviceConfig) error {
+	if err := os.MkdirAll(rootDir, 0o700); err != nil {
+		return fmt.Errorf("create root dir: %w", err)
+	}
+	data, err := yaml.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("encode device config: %w", err)
+	}
+	return os.WriteFile(DeviceConfigPath(rootDir), data, 0o600)
 }
 
 func lookupEnvTrimmed(key string) (string, bool) {

@@ -18,7 +18,7 @@ import (
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device|eject> [flags]")
+		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device|eject|config> [flags]")
 	}
 
 	switch args[0] {
@@ -52,6 +52,8 @@ func Execute(args []string) error {
 		return runRevokeDevice(args[1:])
 	case "eject":
 		return runEject(args[1:])
+	case "config":
+		return runConfig(args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -543,11 +545,19 @@ func parseClientFlags(name string, args []string) (string, string, error) {
 	if err := fs.Parse(args); err != nil {
 		return "", "", err
 	}
-	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
 	if err != nil {
 		return "", "", err
 	}
-	return *mailbox, resolvedDataDir, nil
+	resolvedMailbox := *mailbox
+	if resolvedMailbox == "" {
+		resolvedMailbox = devCfg.DefaultMailbox
+	}
+	resolvedDataDir, err := resolveDataDir(resolvedMailbox, *rootDir, *dataDir)
+	if err != nil {
+		return "", "", err
+	}
+	return resolvedMailbox, resolvedDataDir, nil
 }
 
 func resolveDataDir(mailbox, rootDir, dataDir string) (string, error) {
@@ -558,6 +568,83 @@ func resolveDataDir(mailbox, rootDir, dataDir string) (string, error) {
 		return config.ClientDataDir(rootDir, mailbox), nil
 	}
 	return dataDir, nil
+}
+
+func runConfig(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pandoctl config <show|set-relay|set-mailbox> [flags]")
+	}
+	switch args[0] {
+	case "show":
+		return runConfigShow(args[1:])
+	case "set-relay":
+		return runConfigSetRelay(args[1:])
+	case "set-mailbox":
+		return runConfigSetMailbox(args[1:])
+	default:
+		return fmt.Errorf("unknown config subcommand %q", args[0])
+	}
+}
+
+func runConfigShow(args []string) error {
+	fs := flag.NewFlagSet("config show", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("config file: %s\n", config.DeviceConfigPath(*rootDir))
+	fmt.Printf("relay_url: %s\n", devCfg.RelayURL)
+	fmt.Printf("default_mailbox: %s\n", devCfg.DefaultMailbox)
+	return nil
+}
+
+func runConfigSetRelay(args []string) error {
+	fs := flag.NewFlagSet("config set-relay", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: pandoctl config set-relay <url>")
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	devCfg.RelayURL = fs.Arg(0)
+	if err := config.SaveDeviceConfig(*rootDir, devCfg); err != nil {
+		return err
+	}
+	fmt.Printf("relay_url set to %s\n", devCfg.RelayURL)
+	return nil
+}
+
+func runConfigSetMailbox(args []string) error {
+	fs := flag.NewFlagSet("config set-mailbox", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: pandoctl config set-mailbox <mailbox>")
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	devCfg.DefaultMailbox = fs.Arg(0)
+	if err := config.SaveDeviceConfig(*rootDir, devCfg); err != nil {
+		return err
+	}
+	fmt.Printf("default_mailbox set to %s\n", devCfg.DefaultMailbox)
+	return nil
 }
 
 func writeJSON(file *os.File, value any) error {
