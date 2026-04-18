@@ -19,6 +19,9 @@ func Execute(args []string) error {
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.Addr, "addr", cfg.Addr, "HTTP listen address")
 	fs.StringVar(&cfg.StorePath, "store", cfg.StorePath, "path to relay queue store")
+	fs.DurationVar(&cfg.QueueTTL, "ttl", cfg.QueueTTL, "offline message retention TTL")
+	fs.IntVar(&cfg.MaxMessageBytes, "max-message-bytes", cfg.MaxMessageBytes, "maximum accepted message payload size")
+	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute, "maximum publishes per sender mailbox per minute")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -32,7 +35,11 @@ func Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	server := relay.NewServer(logger, queueStore)
+	server := relay.NewServer(logger, queueStore, relay.Options{
+		QueueTTL:           cfg.QueueTTL,
+		MaxMessageBytes:    cfg.MaxMessageBytes,
+		RateLimitPerMinute: cfg.RateLimitPerMinute,
+	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

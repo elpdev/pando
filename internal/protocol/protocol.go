@@ -25,6 +25,7 @@ type Envelope struct {
 	SenderDeviceSigningPublic    string    `json:"sender_device_signing_public,omitempty"`
 	SenderDeviceEncryptionPublic string    `json:"sender_device_encryption_public,omitempty"`
 	Signature                    string    `json:"signature,omitempty"`
+	ExpiresAt                    time.Time `json:"expires_at,omitempty"`
 	Timestamp                    time.Time `json:"timestamp"`
 }
 

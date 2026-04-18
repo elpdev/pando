@@ -35,11 +35,13 @@ type Model struct {
 	connecting       bool
 	disconnected     bool
 	connected        bool
+	reconnectAttempt int
 	width            int
 	height           int
 }
 
 type clientEventMsg transport.Event
+type reconnectResultMsg struct{ err error }
 type sendResultMsg struct {
 	body string
 	err  error
@@ -90,7 +92,11 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		switch msg.Type {
 		case tea.KeyEnter:
 			body := strings.TrimSpace(m.input.Value())
-			if body == "" || m.disconnected {
+			if body == "" {
+				return m, nil
+			}
+			if !m.connected {
+				m.status = "relay is not connected; waiting to reconnect"
 				return m, nil
 			}
 			envelope, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
@@ -109,11 +115,19 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.status = fmt.Sprintf("disconnected: %v", event.Err)
 			m.disconnected = true
 			m.connected = false
-			return m, nil
+			return m, m.reconnectCmd()
 		}
 		if event.Message != nil {
 			m.handleProtocolMessage(*event.Message)
 		}
+		return m, m.waitForEvent()
+	case reconnectResultMsg:
+		if msg.err != nil {
+			m.disconnected = true
+			m.connected = false
+			return m, m.reconnectCmd()
+		}
+		m.status = fmt.Sprintf("reconnected to %s, waiting for subscribe ack", m.relayURL)
 		return m, m.waitForEvent()
 	case sendResultMsg:
 		if msg.err != nil {
@@ -157,6 +171,8 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		if m.connecting {
 			m.connecting = false
 			m.connected = true
+			m.disconnected = false
+			m.reconnectAttempt = 0
 			m.status = fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox)
 		}
 	case protocol.MessageTypeIncoming:
@@ -189,6 +205,7 @@ func (m *Model) syncViewport() {
 }
 
 func (m *Model) connectCmd() tea.Cmd {
+	m.connecting = true
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -196,6 +213,27 @@ func (m *Model) connectCmd() tea.Cmd {
 			return clientEventMsg(transport.Event{Err: err})
 		}
 		return nil
+	}
+}
+
+func (m *Model) reconnectCmd() tea.Cmd {
+	attempt := m.reconnectAttempt + 1
+	m.reconnectAttempt = attempt
+	shift := attempt - 1
+	if shift > 4 {
+		shift = 4
+	}
+	delay := time.Second * time.Duration(1<<shift)
+	m.connecting = true
+	m.status = fmt.Sprintf("reconnecting to relay in %s", delay)
+	return func() tea.Msg {
+		time.Sleep(delay)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := m.client.Connect(ctx); err != nil {
+			return reconnectResultMsg{err: err}
+		}
+		return reconnectResultMsg{}
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/elpdev/chatui/internal/protocol"
 	bbolt "go.etcd.io/bbolt"
@@ -38,7 +39,7 @@ func (s *MemoryQueueStore) Enqueue(envelope protocol.Envelope) error {
 func (s *MemoryQueueStore) Drain(mailbox string) ([]protocol.Envelope, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	backlog := append([]protocol.Envelope(nil), s.mailboxes[mailbox]...)
+	backlog := filterExpired(append([]protocol.Envelope(nil), s.mailboxes[mailbox]...), time.Now().UTC())
 	delete(s.mailboxes, mailbox)
 	return backlog, nil
 }
@@ -79,6 +80,7 @@ func (s *BoltQueueStore) Enqueue(envelope protocol.Envelope) error {
 				return fmt.Errorf("decode queue: %w", err)
 			}
 		}
+		queue = filterExpired(queue, time.Now().UTC())
 		queue = append(queue, envelope)
 		bytes, err := json.Marshal(queue)
 		if err != nil {
@@ -100,6 +102,10 @@ func (s *BoltQueueStore) Drain(mailbox string) ([]protocol.Envelope, error) {
 		if err := json.Unmarshal(current, &backlog); err != nil {
 			return fmt.Errorf("decode queue: %w", err)
 		}
+		backlog = filterExpired(backlog, time.Now().UTC())
+		if len(backlog) == 0 {
+			return bucket.Delete(key)
+		}
 		return bucket.Delete(key)
 	})
 	if err != nil {
@@ -110,4 +116,15 @@ func (s *BoltQueueStore) Drain(mailbox string) ([]protocol.Envelope, error) {
 
 func (s *BoltQueueStore) Close() error {
 	return s.db.Close()
+}
+
+func filterExpired(queue []protocol.Envelope, now time.Time) []protocol.Envelope {
+	filtered := queue[:0]
+	for _, envelope := range queue {
+		if !envelope.ExpiresAt.IsZero() && !envelope.ExpiresAt.After(now) {
+			continue
+		}
+		filtered = append(filtered, envelope)
+	}
+	return filtered
 }

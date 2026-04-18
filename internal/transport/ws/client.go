@@ -38,9 +38,13 @@ func (c *Client) Connect(ctx context.Context) error {
 	}
 
 	c.mu.Lock()
+	previousConn := c.conn
 	c.conn = conn
 	c.closed = false
 	c.mu.Unlock()
+	if previousConn != nil {
+		_ = previousConn.Close()
+	}
 
 	if err := c.write(protocol.Message{
 		Type: protocol.MessageTypeSubscribe,
@@ -100,6 +104,11 @@ func (c *Client) readLoop() {
 
 		var msg protocol.Message
 		if err := conn.ReadJSON(&msg); err != nil {
+			c.mu.Lock()
+			if c.conn == conn {
+				c.conn = nil
+			}
+			c.mu.Unlock()
 			c.sendEvent(transport.Event{Err: err})
 			return
 		}

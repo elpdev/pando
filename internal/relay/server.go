@@ -17,6 +17,8 @@ type Server struct {
 	logger   *slog.Logger
 	upgrader websocket.Upgrader
 	queue    QueueStore
+	options  Options
+	limiter  *rateLimiter
 
 	mu        sync.Mutex
 	mailboxes map[string]*mailbox
@@ -32,13 +34,24 @@ type subscriber struct {
 	mu      sync.Mutex
 }
 
-func NewServer(logger *slog.Logger, queue QueueStore) *Server {
+func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if queue == nil {
 		queue = NewMemoryQueueStore()
 	}
+	if options.QueueTTL <= 0 {
+		options.QueueTTL = 24 * time.Hour
+	}
+	if options.MaxMessageBytes <= 0 {
+		options.MaxMessageBytes = 64 * 1024
+	}
+	if options.RateLimitPerMinute <= 0 {
+		options.RateLimitPerMinute = 120
+	}
 	return &Server{
-		logger: logger,
-		queue:  queue,
+		logger:  logger,
+		queue:   queue,
+		options: options,
+		limiter: newRateLimiter(options.RateLimitPerMinute),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(*http.Request) bool { return true },
 		},
@@ -107,8 +120,18 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			}
 		case protocol.MessageTypePublish:
 			envelope := msg.Publish.Envelope
+			now := time.Now().UTC()
+			if err := validateEnvelopeLimits(envelope, s.options); err != nil {
+				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				continue
+			}
+			if !s.limiter.Allow(envelope.SenderMailbox, now) {
+				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: "relay rate limit exceeded for sender mailbox"}})
+				continue
+			}
 			envelope.ID = uuid.NewString()
-			envelope.Timestamp = time.Now().UTC()
+			envelope.Timestamp = now
+			envelope.ExpiresAt = now.Add(s.options.QueueTTL)
 			if err := s.publish(envelope); err != nil {
 				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
 				continue

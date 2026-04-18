@@ -9,6 +9,8 @@ Current scope:
 - Invite-based contact exchange and verified device bundles
 - Encrypted 1:1 message envelopes between mailbox IDs
 - Encrypted local chat history per peer conversation
+- Relay size, TTL, and rate-limit controls
+- Client reconnect with backoff after relay disconnects
 
 ## Project Shape
 
@@ -37,6 +39,12 @@ Start the relay:
 
 ```bash
 go run ./cmd/chatui-relay
+```
+
+Optional hardening flags:
+
+```bash
+go run ./cmd/chatui-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120
 ```
 
 Initialize Alice and Bob locally and exchange invites:
@@ -68,3 +76,4 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 ## Current Limitations
 
 - No trusted multi-device enrollment or revocation yet
+- No relay auth tokens or invite-only access control yet

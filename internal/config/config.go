@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
@@ -20,8 +21,11 @@ type Client struct {
 }
 
 type Relay struct {
-	Addr      string
-	StorePath string
+	Addr               string
+	StorePath          string
+	QueueTTL           time.Duration
+	MaxMessageBytes    int
+	RateLimitPerMinute int
 }
 
 func DefaultClient() Client {
@@ -29,7 +33,13 @@ func DefaultClient() Client {
 }
 
 func DefaultRelay() Relay {
-	return Relay{Addr: DefaultRelayAddr, StorePath: RelayStorePath()}
+	return Relay{
+		Addr:               DefaultRelayAddr,
+		StorePath:          RelayStorePath(),
+		QueueTTL:           24 * time.Hour,
+		MaxMessageBytes:    64 * 1024,
+		RateLimitPerMinute: 120,
+	}
 }
 
 func (c Client) Validate() error {
@@ -54,6 +64,15 @@ func (r Relay) Validate() error {
 	}
 	if strings.TrimSpace(r.StorePath) == "" {
 		return fmt.Errorf("relay store path is required")
+	}
+	if r.QueueTTL <= 0 {
+		return fmt.Errorf("relay queue ttl must be positive")
+	}
+	if r.MaxMessageBytes <= 0 {
+		return fmt.Errorf("relay max message bytes must be positive")
+	}
+	if r.RateLimitPerMinute <= 0 {
+		return fmt.Errorf("relay rate limit per minute must be positive")
 	}
 	return nil
 }
