@@ -9,15 +9,50 @@ Private, encrypted terminal chat. End-to-end encrypted messages between people y
 
 ## Install
 
-Install all three binaries to your `$GOPATH/bin`:
+### macOS / Linux — Homebrew
+
+```bash
+brew tap elpdev/tap
+brew install pando
+```
+
+### Arch Linux — AUR
+
+```bash
+yay -S pando-bin
+```
+
+### Windows — Winget
+
+```bash
+winget install elpdev.pando
+```
+
+### Debian / Ubuntu — .deb
+
+Download the `.deb` from the [latest release](https://github.com/elpdev/pando/releases/latest) and install it:
+
+```bash
+sudo dpkg -i pando_*.deb
+```
+
+### Fedora / RHEL — .rpm
+
+```bash
+sudo rpm -i pando_*.rpm
+```
+
+### Direct binary download
+
+Pre-built archives for Linux, macOS, and Windows (amd64 and arm64) are available on the [latest release](https://github.com/elpdev/pando/releases/latest) page. Extract and place the binaries somewhere on your `$PATH`.
+
+### From source
 
 ```bash
 go install github.com/elpdev/pando/cmd/pando@latest
 go install github.com/elpdev/pando/cmd/pando-relay@latest
 go install github.com/elpdev/pando/cmd/pandoctl@latest
 ```
-
-Or download pre-built binaries for Linux, macOS, and Windows from the [latest release](https://github.com/elpdev/pando/releases/latest).
 
 ## Run
 
@@ -137,7 +172,7 @@ Every push to `main` publishes the relay image to GHCR:
 - `ghcr.io/elpdev/pando-relay:vX.Y.Z`
 - `ghcr.io/elpdev/pando-relay:sha-<commit>`
 
-And creates a GitHub Release with binaries for Linux, macOS, and Windows. Version bumps follow conventional commits: `feat:` → minor, everything else → patch, `!` or `BREAKING CHANGE` → major.
+And creates a GitHub Release with archives, `.deb`/`.rpm` packages, and a `checksums.txt` for all supported platforms. Version bumps follow conventional commits: `feat:` → minor, everything else → patch, `!` or `BREAKING CHANGE` → major.
 
 The relay image is multi-arch: `linux/amd64` and `linux/arm64`.
 
