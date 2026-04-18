@@ -1,5 +1,10 @@
 # pando
 
+<picture>
+  <source srcset="docs/images/pando.webp" type="image/webp">
+  <img src="docs/images/pando.webp" alt="Pando banner" width="100%">
+</picture>
+
 First vertical slice for a terminal-native chat client and relay in Go.
 
 Current scope:
