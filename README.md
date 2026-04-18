@@ -5,7 +5,7 @@
   <img src="docs/images/pando.webp" alt="Pando banner" width="100%">
 </picture>
 
-Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through a self-hosted relay.
+Private, encrypted terminal chat. End-to-end encrypted messages between people you trust, delivered through a network of self-hosted relays.
 
 ## Install
 
@@ -24,23 +24,23 @@ Or download pre-built binaries for Linux, macOS, and Windows from the [latest re
 Start the relay:
 
 ```bash
-go run ./cmd/pando-relay
+pando-relay
 ```
 
 Initialize an identity and exchange contacts:
 
 ```bash
-go run ./cmd/pandoctl init --mailbox alice
-go run ./cmd/pandoctl invite-code --mailbox alice --copy
-go run ./cmd/pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
-go run ./cmd/pandoctl list-contacts --mailbox alice
-go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
+pandoctl init --mailbox alice
+pandoctl invite-code --mailbox alice --copy
+pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
+pandoctl list-contacts --mailbox alice
+pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
 
 Start the client:
 
 ```bash
-go run ./cmd/pando
+pando
 ```
 
 ### Relay configuration
@@ -50,7 +50,7 @@ Relay settings can be set via flags or environment variables — useful for cont
 ```bash
 export PANDO_RELAY_AUTH_TOKEN="your-shared-secret"
 export PANDO_RELAY_ADDR=":8080"
-go run ./cmd/pando-relay
+pando-relay
 ```
 
 Supported environment variables:
