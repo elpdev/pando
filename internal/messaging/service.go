@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/elpdev/chatui/internal/identity"
 	"github.com/elpdev/chatui/internal/protocol"
@@ -24,6 +25,28 @@ func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
 
 func (s *Service) Identity() *identity.Identity {
 	return s.identity
+}
+
+func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
+	return s.store.LoadHistory(s.identity, peerMailbox)
+}
+
+func (s *Service) SaveSent(peerMailbox, body string) error {
+	return s.store.AppendHistory(s.identity, store.MessageRecord{
+		PeerMailbox: peerMailbox,
+		Direction:   "outbound",
+		Body:        body,
+		Timestamp:   time.Now().UTC(),
+	})
+}
+
+func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time) error {
+	return s.store.AppendHistory(s.identity, store.MessageRecord{
+		PeerMailbox: peerMailbox,
+		Direction:   "inbound",
+		Body:        body,
+		Timestamp:   timestamp,
+	})
 }
 
 func (s *Service) EncryptOutgoing(recipientMailbox, body string) (protocol.Envelope, error) {

@@ -8,6 +8,7 @@ Current scope:
 - Bubble Tea shell app with a dedicated chat route model
 - Invite-based contact exchange and verified device bundles
 - Encrypted 1:1 message envelopes between mailbox IDs
+- Encrypted local chat history per peer conversation
 
 ## Project Shape
 
@@ -67,4 +68,3 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 ## Current Limitations
 
 - No trusted multi-device enrollment or revocation yet
-- No encrypted local history yet

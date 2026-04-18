@@ -40,7 +40,10 @@ type Model struct {
 }
 
 type clientEventMsg transport.Event
-type sendResultMsg struct{ err error }
+type sendResultMsg struct {
+	body string
+	err  error
+}
 
 func New(deps Deps) *Model {
 	input := textinput.New()
@@ -69,6 +72,7 @@ func New(deps Deps) *Model {
 }
 
 func (m *Model) Init() tea.Cmd {
+	m.loadHistory()
 	return tea.Batch(m.connectCmd(), m.waitForEvent())
 }
 
@@ -97,7 +101,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
 			m.input.SetValue("")
 			m.syncViewport()
-			return m, m.sendCmd(envelope)
+			return m, m.sendCmd(body, envelope)
 		}
 	case clientEventMsg:
 		event := transport.Event(msg)
@@ -114,6 +118,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	case sendResultMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("send failed: %v", msg.err)
+			return m, nil
+		}
+		if err := m.messaging.SaveSent(m.recipientMailbox, msg.body); err != nil {
+			m.status = fmt.Sprintf("save history failed: %v", err)
 		}
 		return m, nil
 	}
@@ -158,6 +166,9 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 				m.status = fmt.Sprintf("decrypt failed: %v", err)
 				return
 			}
+			if err := m.messaging.SaveReceived(msg.Incoming.SenderMailbox, body, msg.Incoming.Timestamp); err != nil {
+				m.status = fmt.Sprintf("save history failed: %v", err)
+			}
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
 			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, body))
 			m.syncViewport()
@@ -198,8 +209,24 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) sendCmd(envelope protocol.Envelope) tea.Cmd {
+func (m *Model) sendCmd(body string, envelope protocol.Envelope) tea.Cmd {
 	return func() tea.Msg {
-		return sendResultMsg{err: m.client.Send(envelope)}
+		return sendResultMsg{body: body, err: m.client.Send(envelope)}
+	}
+}
+
+func (m *Model) loadHistory() {
+	records, err := m.messaging.History(m.recipientMailbox)
+	if err != nil {
+		m.status = fmt.Sprintf("load history failed: %v", err)
+		return
+	}
+	for _, record := range records {
+		ts := record.Timestamp.Format(time.Kitchen)
+		if record.Direction == "outbound" {
+			m.messages = append(m.messages, fmt.Sprintf("[%s] you -> %s: %s", ts, m.recipientMailbox, record.Body))
+			continue
+		}
+		m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, record.PeerMailbox, m.mailbox, record.Body))
 	}
 }
