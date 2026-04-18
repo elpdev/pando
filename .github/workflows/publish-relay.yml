@@ -1,4 +1,4 @@
-name: Publish Relay Image
+name: Publish
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -61,132 +61,28 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Compute next semver tag
+      - name: Bump version and create tag
         if: steps.changes.outputs.should_release == 'true'
         id: version
-        shell: bash
-        run: |
-          major_regex='^[a-zA-Z]+(\([^)]+\))?!:'
-          minor_regex='^feat(\([^)]+\))?:'
-          latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
-          if [[ -z "$latest_tag" ]]; then
-            current_major=0
-            current_minor=0
-            current_patch=0
-            commit_range="${GITHUB_SHA}"
-            previous_tag=""
-          else
-            version="${latest_tag#v}"
-            IFS='.' read -r current_major current_minor current_patch <<< "$version"
-            commit_range="${latest_tag}..${GITHUB_SHA}"
-            previous_tag="$latest_tag"
-          fi
+        uses: mathieudutour/github-tag-action@v6.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          tag_prefix: v
+          default_bump: patch
+          initial_version: 0.1.0
 
-          bump="patch"
-          while IFS= read -r commit; do
-            [[ -z "$commit" ]] && continue
-            if [[ "$commit" == *"BREAKING CHANGE:"* ]] || [[ "$commit" =~ $major_regex ]]; then
-              bump="major"
-              break
-            fi
-            if [[ "$commit" =~ $minor_regex ]]; then
-              bump="minor"
-            fi
-          done < <(git log --format='%s%n%b' "$commit_range")
-
-          case "$bump" in
-            major)
-              next_tag="v$((current_major + 1)).0.0"
-              ;;
-            minor)
-              next_tag="v${current_major}.$((current_minor + 1)).0"
-              ;;
-            *)
-              if [[ -z "$latest_tag" ]]; then
-                next_tag="v0.1.0"
-              else
-                next_tag="v${current_major}.${current_minor}.$((current_patch + 1))"
-              fi
-              ;;
-          esac
-
-          echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
-          echo "bump=${bump}" >> "$GITHUB_OUTPUT"
-          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
-
-      - name: Create git tag
+      - name: Run GoReleaser
         if: steps.changes.outputs.should_release == 'true'
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean --skip=validate
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh api \
-            --method POST \
-            "/repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${{ steps.version.outputs.tag }}" \
-            -f sha="${GITHUB_SHA}"
-
-      - name: Build release binaries
-        if: steps.changes.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          version="${{ steps.version.outputs.tag }}"
-
-          build_unix() {
-            local goos="$1"
-            local goarch="$2"
-            local archive="pando_${version#v}_${goos}_${goarch}.tar.gz"
-            local outdir="dist/pando_${version#v}_${goos}_${goarch}"
-            mkdir -p "$outdir"
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando" ./cmd/pando
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando-relay" ./cmd/pando-relay
-            GOOS="$goos" GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pandoctl" ./cmd/pandoctl
-            tar -C "$outdir" -czf "dist/$archive" .
-            rm -rf "$outdir"
-          }
-
-          build_windows() {
-            local goarch="$1"
-            local archive="pando_${version#v}_windows_${goarch}.zip"
-            local outdir="dist/pando_${version#v}_windows_${goarch}"
-            mkdir -p "$outdir"
-            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando.exe" ./cmd/pando
-            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pando-relay.exe" ./cmd/pando-relay
-            GOOS=windows GOARCH="$goarch" CGO_ENABLED=0 go build -mod=vendor -o "$outdir/pandoctl.exe" ./cmd/pandoctl
-            (cd "$outdir" && zip -q -r "../$archive" .)
-            rm -rf "$outdir"
-          }
-
-          build_unix linux amd64
-          build_unix linux arm64
-          build_unix darwin amd64
-          build_unix darwin arm64
-          build_windows amd64
-          build_windows arm64
-
-      - name: Create GitHub release
-        if: steps.changes.outputs.should_release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          args=(
-            "${{ steps.version.outputs.tag }}"
-            --target "${GITHUB_SHA}"
-            --title "${{ steps.version.outputs.tag }}"
-            --generate-notes
-          )
-          if [[ -n "${{ steps.version.outputs.previous_tag }}" ]]; then
-            args+=(--notes-start-tag "${{ steps.version.outputs.previous_tag }}")
-          fi
-          gh release create "${args[@]}"
-
-      - name: Upload release binaries
-        if: steps.changes.outputs.should_release == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release upload "${{ steps.version.outputs.tag }}" dist/*
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GORELEASER_CURRENT_TAG: ${{ steps.version.outputs.new_tag }}
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          AUR_KEY: ${{ secrets.AUR_KEY }}
 
       - name: Set up QEMU
         if: steps.changes.outputs.should_release == 'true'
@@ -213,7 +109,7 @@ jobs:
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
             type=raw,value=main
-            type=raw,value=${{ steps.version.outputs.tag }}
+            type=raw,value=${{ steps.version.outputs.new_tag }}
             type=sha,format=short,prefix=sha-
 
       - name: Build and push relay image
