@@ -15,6 +15,7 @@ const (
 
 type Client struct {
 	RelayURL         string
+	RelayToken       string
 	Mailbox          string
 	RecipientMailbox string
 	DataDir          string
@@ -26,6 +27,7 @@ type Relay struct {
 	QueueTTL           time.Duration
 	MaxMessageBytes    int
 	RateLimitPerMinute int
+	AuthToken          string
 }
 
 func DefaultClient() Client {

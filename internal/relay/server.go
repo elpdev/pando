@@ -72,6 +72,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
+	if s.options.AuthToken != "" && r.Header.Get(authHeader) != s.options.AuthToken {
+		http.Error(w, "relay auth token is required", http.StatusUnauthorized)
+		return
+	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		s.logger.Error("upgrade websocket", "error", err)

@@ -12,8 +12,11 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const authHeader = "X-Chatui-Relay-Token"
+
 type Client struct {
 	url     string
+	token   string
 	mailbox string
 
 	mu     sync.Mutex
@@ -22,9 +25,10 @@ type Client struct {
 	closed bool
 }
 
-func NewClient(url, mailbox string) *Client {
+func NewClient(url, token, mailbox string) *Client {
 	return &Client{
 		url:     url,
+		token:   token,
 		mailbox: mailbox,
 		events:  make(chan transport.Event, 32),
 	}
@@ -32,7 +36,11 @@ func NewClient(url, mailbox string) *Client {
 
 func (c *Client) Connect(ctx context.Context) error {
 	dialer := websocket.Dialer{Proxy: http.ProxyFromEnvironment}
-	conn, _, err := dialer.DialContext(ctx, c.url, nil)
+	headers := http.Header{}
+	if c.token != "" {
+		headers.Set(authHeader, c.token)
+	}
+	conn, _, err := dialer.DialContext(ctx, c.url, headers)
 	if err != nil {
 		return err
 	}

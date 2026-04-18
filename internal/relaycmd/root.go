@@ -22,6 +22,7 @@ func Execute(args []string) error {
 	fs.DurationVar(&cfg.QueueTTL, "ttl", cfg.QueueTTL, "offline message retention TTL")
 	fs.IntVar(&cfg.MaxMessageBytes, "max-message-bytes", cfg.MaxMessageBytes, "maximum accepted message payload size")
 	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute, "maximum publishes per sender mailbox per minute")
+	fs.StringVar(&cfg.AuthToken, "auth-token", cfg.AuthToken, "optional shared token required for relay websocket access")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -39,6 +40,7 @@ func Execute(args []string) error {
 		QueueTTL:           cfg.QueueTTL,
 		MaxMessageBytes:    cfg.MaxMessageBytes,
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
+		AuthToken:          cfg.AuthToken,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

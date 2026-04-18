@@ -12,6 +12,7 @@ Current scope:
 - Relay size, TTL, and rate-limit controls
 - Client reconnect with backoff after relay disconnects
 - Contact fingerprint display and explicit verification flow
+- Optional relay auth tokens for private deployments
 
 ## Project Shape
 
@@ -45,7 +46,7 @@ go run ./cmd/chatui-relay
 Optional hardening flags:
 
 ```bash
-go run ./cmd/chatui-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120
+go run ./cmd/chatui-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120 --auth-token secret-token
 ```
 
 Initialize Alice and Bob locally and exchange invites:
@@ -66,6 +67,7 @@ Open one terminal for Alice:
 
 ```bash
 go run ./cmd/chatui --mailbox alice --to bob
+go run ./cmd/chatui --mailbox alice --to bob --relay-token secret-token
 ```
 
 Open another terminal for Bob:
@@ -79,4 +81,3 @@ If Bob is offline when Alice sends a message, the relay will keep that ciphertex
 ## Current Limitations
 
 - No trusted multi-device enrollment or revocation yet
-- No relay auth tokens or invite-only access control yet

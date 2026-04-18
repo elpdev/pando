@@ -19,6 +19,7 @@ func Execute(args []string) error {
 	fs := flag.NewFlagSet("chatui", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	fs.StringVar(&cfg.RelayURL, "relay", cfg.RelayURL, "relay websocket URL")
+	fs.StringVar(&cfg.RelayToken, "relay-token", cfg.RelayToken, "relay auth token")
 	fs.StringVar(&cfg.Mailbox, "mailbox", "", "local mailbox identifier")
 	fs.StringVar(&cfg.RecipientMailbox, "to", "", "recipient mailbox identifier")
 	fs.StringVar(&cfg.DataDir, "data-dir", "", "client state directory")
@@ -38,7 +39,7 @@ func Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := ws.NewClient(cfg.RelayURL, cfg.Mailbox)
+	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, cfg.Mailbox)
 	chatModel := chat.New(chat.Deps{
 		Client:           client,
 		Messaging:        service,

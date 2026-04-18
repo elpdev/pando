@@ -12,6 +12,7 @@ type Options struct {
 	QueueTTL           time.Duration
 	MaxMessageBytes    int
 	RateLimitPerMinute int
+	AuthToken          string
 }
 
 type rateLimiter struct {
