@@ -36,6 +36,8 @@ type Model struct {
 	disconnected     bool
 	connected        bool
 	reconnectAttempt int
+	peerFingerprint  string
+	peerVerified     bool
 	width            int
 	height           int
 }
@@ -57,6 +59,15 @@ func New(deps Deps) *Model {
 	vp := viewport.New(0, 0)
 	vp.SetContent("")
 
+	peerFingerprint := "unknown"
+	peerVerified := false
+	if deps.Messaging != nil {
+		if contact, err := deps.Messaging.Contact(deps.RecipientMailbox); err == nil {
+			peerFingerprint = contact.Fingerprint()
+			peerVerified = contact.Verified
+		}
+	}
+
 	return &Model{
 		client:           deps.Client,
 		messaging:        deps.Messaging,
@@ -68,8 +79,12 @@ func New(deps Deps) *Model {
 		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
 		messages: []string{
 			fmt.Sprintf("Encrypted chat ready. Target mailbox: %s", deps.RecipientMailbox),
+			fmt.Sprintf("Your fingerprint: %s", deps.Messaging.Identity().Fingerprint()),
+			fmt.Sprintf("Peer fingerprint: %s (%s)", peerFingerprint, verificationLabel(peerVerified)),
 		},
-		connecting: true,
+		connecting:      true,
+		peerFingerprint: peerFingerprint,
+		peerVerified:    peerVerified,
 	}
 }
 
@@ -150,7 +165,7 @@ func (m *Model) View() string {
 }
 
 func (m *Model) Status() string {
-	return m.status
+	return fmt.Sprintf("%s | peer=%s %s", m.status, verificationLabel(m.peerVerified), m.peerFingerprint)
 }
 
 func (m *Model) Mailbox() string {
@@ -267,4 +282,11 @@ func (m *Model) loadHistory() {
 		}
 		m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, record.PeerMailbox, m.mailbox, record.Body))
 	}
+}
+
+func verificationLabel(verified bool) string {
+	if verified {
+		return "verified"
+	}
+	return "unverified"
 }

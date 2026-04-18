@@ -11,6 +11,7 @@ Current scope:
 - Encrypted local chat history per peer conversation
 - Relay size, TTL, and rate-limit controls
 - Client reconnect with backoff after relay disconnects
+- Contact fingerprint display and explicit verification flow
 
 ## Project Shape
 
@@ -57,6 +58,8 @@ go run ./cmd/chatuictl export-invite --mailbox alice --out /tmp/alice-invite.jso
 go run ./cmd/chatuictl export-invite --mailbox bob --out /tmp/bob-invite.json
 go run ./cmd/chatuictl import-contact --mailbox alice --invite /tmp/bob-invite.json
 go run ./cmd/chatuictl import-contact --mailbox bob --invite /tmp/alice-invite.json
+go run ./cmd/chatuictl list-contacts --mailbox alice
+go run ./cmd/chatuictl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
 
 Open one terminal for Alice:

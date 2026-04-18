@@ -97,6 +97,24 @@ func (s *ClientStore) ListContacts() ([]identity.Contact, error) {
 	return list, nil
 }
 
+func (s *ClientStore) MarkContactVerified(mailbox string, verified bool) (*identity.Contact, error) {
+	contacts, err := s.loadContactsMap()
+	if err != nil {
+		return nil, err
+	}
+	contact, ok := contacts[mailbox]
+	if !ok {
+		return nil, ErrNotFound
+	}
+	contact.Verified = verified
+	contacts[mailbox] = contact
+	if err := s.writeJSON(s.contactsPath(), contacts, 0o600); err != nil {
+		return nil, err
+	}
+	copyContact := contact
+	return &copyContact, nil
+}
+
 func (s *ClientStore) identityPath() string {
 	return filepath.Join(s.dir, "identity.json")
 }

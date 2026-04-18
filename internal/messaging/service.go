@@ -27,6 +27,10 @@ func (s *Service) Identity() *identity.Identity {
 	return s.identity
 }
 
+func (s *Service) Contact(mailbox string) (*identity.Contact, error) {
+	return s.store.LoadContact(mailbox)
+}
+
 func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
 	return s.store.LoadHistory(s.identity, peerMailbox)
 }

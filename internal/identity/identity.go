@@ -77,8 +77,11 @@ func (i *Identity) InviteBundle() InviteBundle {
 }
 
 func (i *Identity) Fingerprint() string {
-	hash := sha256.Sum256(i.AccountSigningPublic)
-	return hex.EncodeToString(hash[:8])
+	return Fingerprint(i.AccountSigningPublic)
+}
+
+func (c *Contact) Fingerprint() string {
+	return Fingerprint(c.AccountSigningPublic)
 }
 
 func (i *Identity) EncryptionKeyPair() (*[32]byte, *[32]byte, error) {
@@ -145,4 +148,9 @@ func bytesToKey(value []byte) (*[32]byte, error) {
 	var key [32]byte
 	copy(key[:], value)
 	return &key, nil
+}
+
+func Fingerprint(publicKey ed25519.PublicKey) string {
+	hash := sha256.Sum256(publicKey)
+	return hex.EncodeToString(hash[:8])
 }

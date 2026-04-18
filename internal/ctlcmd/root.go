@@ -13,7 +13,7 @@ import (
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: chatuictl <init|show-identity|export-invite|import-contact|list-contacts> [flags]")
+		return fmt.Errorf("usage: chatuictl <init|show-identity|export-invite|import-contact|list-contacts|show-contact|verify-contact> [flags]")
 	}
 
 	switch args[0] {
@@ -27,6 +27,10 @@ func Execute(args []string) error {
 		return runImportContact(args[1:])
 	case "list-contacts":
 		return runListContacts(args[1:])
+	case "show-contact":
+		return runShowContact(args[1:])
+	case "verify-contact":
+		return runVerifyContact(args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
@@ -155,7 +159,80 @@ func runListContacts(args []string) error {
 	if err != nil {
 		return err
 	}
-	return writeJSON(os.Stdout, contacts)
+	output := make([]struct {
+		Mailbox     string `json:"mailbox"`
+		Fingerprint string `json:"fingerprint"`
+		Verified    bool   `json:"verified"`
+	}, 0, len(contacts))
+	for _, contact := range contacts {
+		output = append(output, struct {
+			Mailbox     string `json:"mailbox"`
+			Fingerprint string `json:"fingerprint"`
+			Verified    bool   `json:"verified"`
+		}{Mailbox: contact.Mailbox, Fingerprint: contact.Fingerprint(), Verified: contact.Verified})
+	}
+	return writeJSON(os.Stdout, output)
+}
+
+func runShowContact(args []string) error {
+	fs := flag.NewFlagSet("show-contact", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	dataDir := fs.String("data-dir", "", "client state directory")
+	contactMailbox := fs.String("contact", "", "contact mailbox identifier")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	if err != nil {
+		return err
+	}
+	if *contactMailbox == "" {
+		return fmt.Errorf("-contact is required")
+	}
+	clientStore := store.NewClientStore(resolvedDataDir)
+	contact, err := clientStore.LoadContact(*contactMailbox)
+	if err != nil {
+		return err
+	}
+	return writeJSON(os.Stdout, struct {
+		Mailbox     string `json:"mailbox"`
+		Fingerprint string `json:"fingerprint"`
+		Verified    bool   `json:"verified"`
+	}{Mailbox: contact.Mailbox, Fingerprint: contact.Fingerprint(), Verified: contact.Verified})
+}
+
+func runVerifyContact(args []string) error {
+	fs := flag.NewFlagSet("verify-contact", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	dataDir := fs.String("data-dir", "", "client state directory")
+	contactMailbox := fs.String("contact", "", "contact mailbox identifier")
+	expectedFingerprint := fs.String("fingerprint", "", "expected contact fingerprint")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	if err != nil {
+		return err
+	}
+	if *contactMailbox == "" {
+		return fmt.Errorf("-contact is required")
+	}
+	clientStore := store.NewClientStore(resolvedDataDir)
+	contact, err := clientStore.LoadContact(*contactMailbox)
+	if err != nil {
+		return err
+	}
+	if *expectedFingerprint != "" && contact.Fingerprint() != *expectedFingerprint {
+		return fmt.Errorf("contact fingerprint mismatch: expected %s, got %s", *expectedFingerprint, contact.Fingerprint())
+	}
+	contact, err = clientStore.MarkContactVerified(*contactMailbox, true)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("verified contact %s (%s)\n", contact.Mailbox, contact.Fingerprint())
+	return nil
 }
 
 func parseClientFlags(name string, args []string) (string, string, error) {
