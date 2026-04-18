@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/gorilla/websocket"
@@ -80,6 +81,79 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 	if incoming.Incoming == nil || incoming.Incoming.Body != "live hello" {
 		t.Fatalf("unexpected incoming payload: %+v", incoming.Incoming)
 	}
+}
+
+func TestSubscriberPublishAckDoesNotBlockIncomingDelivery(t *testing.T) {
+	server := newTestServer(t)
+
+	subscriber := dialTestConn(t, server)
+	defer subscriber.Close()
+	_ = subscriber.SetReadDeadline(time.Now().Add(10 * time.Second))
+
+	writeMessage(t, subscriber, protocol.Message{
+		Type:      protocol.MessageTypeSubscribe,
+		Subscribe: &protocol.SubscribeRequest{Mailbox: "bob"},
+	})
+	readMessage(t, subscriber)
+
+	publisher := dialTestConn(t, server)
+	defer publisher.Close()
+
+	const total = 48
+	done := make(chan error, 1)
+	go func() {
+		for i := 0; i < total; i++ {
+			writeMessage(t, publisher, protocol.Message{
+				Type: protocol.MessageTypePublish,
+				Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{
+					SenderMailbox:    "alice",
+					RecipientMailbox: "bob",
+					Body:             "chunk",
+				}},
+			})
+			msg := readMessage(t, publisher)
+			if msg.Type != protocol.MessageTypeAck {
+				done <- &unexpectedMessageTypeError{got: msg.Type, want: protocol.MessageTypeAck}
+				return
+			}
+		}
+		done <- nil
+	}()
+
+	acks := 0
+	incoming := 0
+	for acks < total || incoming < total {
+		msg := readMessage(t, subscriber)
+		switch msg.Type {
+		case protocol.MessageTypeIncoming:
+			incoming++
+			writeMessage(t, subscriber, protocol.Message{
+				Type: protocol.MessageTypePublish,
+				Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{
+					SenderMailbox:    "bob",
+					RecipientMailbox: "alice",
+					Body:             "ack",
+				}},
+			})
+		case protocol.MessageTypeAck:
+			acks++
+		default:
+			t.Fatalf("unexpected message type %q", msg.Type)
+		}
+	}
+
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+type unexpectedMessageTypeError struct {
+	got  string
+	want string
+}
+
+func (e *unexpectedMessageTypeError) Error() string {
+	return "unexpected message type: got " + e.got + " want " + e.want
 }
 
 func newTestServer(t *testing.T) *httptest.Server {

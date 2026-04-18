@@ -213,10 +213,6 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 	if err != nil {
 		return nil, err
 	}
-	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
-	if err != nil {
-		return nil, err
-	}
 	payload, ok, err := decodeContentPayload(body)
 	if err != nil {
 		return nil, err
@@ -227,9 +223,13 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 			return nil, err
 		}
 		if !done {
-			return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, AckEnvelopes: ackEnvelopes}, nil
+			return &IncomingResult{Control: true, PeerAccountID: contact.AccountID}, nil
 		}
-		return &IncomingResult{PeerAccountID: contact.AccountID, Body: message, AckEnvelopes: ackEnvelopes}, nil
+		return &IncomingResult{PeerAccountID: contact.AccountID, Body: message}, nil
+	}
+	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
+	if err != nil {
+		return nil, err
 	}
 	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body, MessageID: envelope.ClientMessageID, AckEnvelopes: ackEnvelopes}, nil
 }

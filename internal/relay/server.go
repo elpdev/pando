@@ -126,7 +126,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if err := msg.Validate(); err != nil {
-			s.write(conn, protocol.Message{
+			s.writeConn(current, conn, protocol.Message{
 				Type:  protocol.MessageTypeError,
 				Error: &protocol.Error{Message: err.Error()},
 			})
@@ -142,7 +142,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			current = &subscriber{conn: conn, mailbox: msg.Subscribe.Mailbox}
 			backlog, err := s.register(current)
 			if err != nil {
-				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
 				continue
 			}
 			s.writeSubscriber(current, protocol.Message{
@@ -156,21 +156,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			envelope := msg.Publish.Envelope
 			now := time.Now().UTC()
 			if err := validateEnvelopeLimits(envelope, s.options); err != nil {
-				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
 				continue
 			}
 			if !s.limiter.Allow(envelope.SenderMailbox, now) {
-				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: "relay rate limit exceeded for sender mailbox"}})
+				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: "relay rate limit exceeded for sender mailbox"}})
 				continue
 			}
 			envelope.ID = uuid.NewString()
 			envelope.Timestamp = now
 			envelope.ExpiresAt = now.Add(s.options.QueueTTL)
 			if err := s.publish(envelope); err != nil {
-				s.write(conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
 				continue
 			}
-			s.write(conn, protocol.Message{
+			s.writeConn(current, conn, protocol.Message{
 				Type: protocol.MessageTypeAck,
 				Ack:  &protocol.Ack{ID: envelope.ID},
 			})
@@ -251,6 +251,14 @@ func (s *Server) writeSubscriber(sub *subscriber, msg protocol.Message) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
 	s.write(sub.conn, msg)
+}
+
+func (s *Server) writeConn(sub *subscriber, conn *websocket.Conn, msg protocol.Message) {
+	if sub != nil {
+		s.writeSubscriber(sub, msg)
+		return
+	}
+	s.write(conn, msg)
 }
 
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {

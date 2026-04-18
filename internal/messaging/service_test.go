@@ -1,15 +1,23 @@
 package messaging
 
 import (
+	"context"
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/store"
+	"github.com/elpdev/pando/internal/transport"
+	wsclient "github.com/elpdev/pando/internal/transport/ws"
+	"net/http/httptest"
 )
 
 func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
@@ -267,8 +275,228 @@ func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	if string(storedBytes) != string(photoBytes) {
 		t.Fatal("stored attachment bytes did not match original photo")
 	}
-	if len(finalResult.AckEnvelopes) != 1 {
-		t.Fatalf("expected one delivery ack for final chunk, got %d", len(finalResult.AckEnvelopes))
+	if len(finalResult.AckEnvelopes) != 0 {
+		t.Fatalf("expected no delivery ack for photo chunks, got %d", len(finalResult.AckEnvelopes))
+	}
+}
+
+func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
+	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
+	defer server.Close()
+
+	aliceDir := t.TempDir()
+	aliceStore := store.NewClientStore(aliceDir)
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobDir := t.TempDir()
+	bobStore := store.NewClientStore(bobDir)
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	photoBytes := mustPhotoBytes(t)
+	photoBytes = append(photoBytes, make([]byte, 410178-len(photoBytes))...)
+	photoPath := filepath.Join(t.TempDir(), "bender.png")
+	if err := os.WriteFile(photoPath, photoBytes, 0o600); err != nil {
+		t.Fatalf("write photo fixture: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "alice")
+	defer aliceClient.Close()
+	if err := aliceClient.Connect(ctx); err != nil {
+		t.Fatalf("connect alice client: %v", err)
+	}
+	awaitSubscribeAck(t, aliceClient.Events())
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "bob")
+	defer bobClient.Close()
+	if err := bobClient.Connect(ctx); err != nil {
+		t.Fatalf("connect bob client: %v", err)
+	}
+	awaitSubscribeAck(t, bobClient.Events())
+
+	batch, _, err := bobService.PreparePhotoOutgoing("alice", photoPath)
+	if err != nil {
+		t.Fatalf("prepare photo outgoing: %v", err)
+	}
+	for _, envelope := range batch.Envelopes {
+		if err := bobClient.Send(envelope); err != nil {
+			t.Fatalf("bob send photo envelope: %v", err)
+		}
+	}
+
+	var finalResult *IncomingResult
+	deadline := time.After(10 * time.Second)
+	for finalResult == nil {
+		select {
+		case event := <-aliceClient.Events():
+			if event.Err != nil {
+				t.Fatalf("alice event error: %v", event.Err)
+			}
+			if event.Message == nil || event.Message.Type != "incoming" || event.Message.Incoming == nil {
+				continue
+			}
+			result, err := aliceService.HandleIncoming(*event.Message.Incoming)
+			if err != nil {
+				t.Fatalf("alice handle incoming: %v", err)
+			}
+			if result == nil {
+				continue
+			}
+			for _, ack := range result.AckEnvelopes {
+				if err := aliceClient.Send(ack); err != nil {
+					t.Fatalf("alice send ack: %v", err)
+				}
+			}
+			if !result.Control && strings.Contains(result.Body, "photo received:") {
+				finalResult = result
+			}
+		case event := <-bobClient.Events():
+			if event.Err != nil {
+				t.Fatalf("bob event error: %v", event.Err)
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for final photo result")
+		}
+	}
+
+	attachments, err := filepath.Glob(filepath.Join(aliceDir, "attachments", "bob", "*"))
+	if err != nil {
+		t.Fatalf("glob alice attachments: %v", err)
+	}
+	if len(attachments) != 1 {
+		t.Fatalf("expected one alice attachment, got %v", attachments)
+	}
+	saved, err := os.ReadFile(attachments[0])
+	if err != nil {
+		t.Fatalf("read saved attachment: %v", err)
+	}
+	if string(saved) != string(photoBytes) {
+		t.Fatal("saved attachment bytes did not match sent bytes")
+	}
+}
+
+func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
+	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
+	defer server.Close()
+
+	aliceDir := t.TempDir()
+	aliceStore := store.NewClientStore(aliceDir)
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobDir := t.TempDir()
+	bobStore := store.NewClientStore(bobDir)
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	photoBytes := mustPhotoBytes(t)
+	photoBytes = append(photoBytes, make([]byte, 410178-len(photoBytes))...)
+	alicePhotoPath := filepath.Join(t.TempDir(), "alice.png")
+	bobPhotoPath := filepath.Join(t.TempDir(), "bob.png")
+	if err := os.WriteFile(alicePhotoPath, photoBytes, 0o600); err != nil {
+		t.Fatalf("write alice photo: %v", err)
+	}
+	if err := os.WriteFile(bobPhotoPath, photoBytes, 0o600); err != nil {
+		t.Fatalf("write bob photo: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "alice")
+	defer aliceClient.Close()
+	if err := aliceClient.Connect(ctx); err != nil {
+		t.Fatalf("connect alice client: %v", err)
+	}
+	awaitSubscribeAck(t, aliceClient.Events())
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "bob")
+	defer bobClient.Close()
+	if err := bobClient.Connect(ctx); err != nil {
+		t.Fatalf("connect bob client: %v", err)
+	}
+	awaitSubscribeAck(t, bobClient.Events())
+
+	sendPhotoAndAwaitReceipt(t, aliceClient, aliceService, bobClient, bobService, "bob", alicePhotoPath)
+	sendPhotoAndAwaitReceipt(t, bobClient, bobService, aliceClient, aliceService, "alice", bobPhotoPath)
+
+	if matches, err := filepath.Glob(filepath.Join(aliceDir, "attachments", "bob", "*")); err != nil || len(matches) != 1 {
+		t.Fatalf("expected one bob attachment for alice, got %v err=%v", matches, err)
+	}
+	if matches, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*")); err != nil || len(matches) != 1 {
+		t.Fatalf("expected one alice attachment for bob, got %v err=%v", matches, err)
+	}
+}
+
+func sendPhotoAndAwaitReceipt(t *testing.T, senderClient *wsclient.Client, senderService *Service, receiverClient *wsclient.Client, receiverService *Service, recipientMailbox, path string) {
+	t.Helper()
+	batch, _, err := senderService.PreparePhotoOutgoing(recipientMailbox, path)
+	if err != nil {
+		t.Fatalf("prepare photo outgoing: %v", err)
+	}
+	for _, envelope := range batch.Envelopes {
+		if err := senderClient.Send(envelope); err != nil {
+			t.Fatalf("send photo envelope: %v", err)
+		}
+	}
+	deadline := time.After(10 * time.Second)
+	for {
+		select {
+		case event := <-receiverClient.Events():
+			if event.Err != nil {
+				t.Fatalf("receiver event error: %v", event.Err)
+			}
+			if event.Message == nil || event.Message.Type != protocol.MessageTypeIncoming || event.Message.Incoming == nil {
+				continue
+			}
+			result, err := receiverService.HandleIncoming(*event.Message.Incoming)
+			if err != nil {
+				t.Fatalf("receiver handle incoming: %v", err)
+			}
+			if result != nil && !result.Control && strings.Contains(result.Body, "photo received:") {
+				return
+			}
+		case event := <-senderClient.Events():
+			if event.Err != nil {
+				t.Fatalf("sender event error: %v", event.Err)
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for photo receipt")
+		}
 	}
 }
 
@@ -279,4 +507,25 @@ func mustPhotoBytes(t *testing.T) []byte {
 		t.Fatalf("decode photo bytes: %v", err)
 	}
 	return bytes
+}
+
+func awaitSubscribeAck(t *testing.T, events <-chan transport.Event) {
+	t.Helper()
+	select {
+	case event := <-events:
+		if event.Err != nil {
+			t.Fatalf("unexpected event error: %v", event.Err)
+		}
+		if event.Message == nil || event.Message.Type != protocol.MessageTypeAck {
+			t.Fatalf("expected subscribe ack, got %+v", event.Message)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for subscribe ack")
+	}
+}
+
+type testWriter struct{}
+
+func (testWriter) Write(p []byte) (n int, err error) {
+	return len(p), nil
 }
