@@ -14,6 +14,6 @@ type Event struct {
 type Client interface {
 	Connect(context.Context) error
 	Events() <-chan Event
-	Send(recipient, body string) error
+	Send(protocol.Envelope) error
 	Close() error
 }

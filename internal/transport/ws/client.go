@@ -60,15 +60,11 @@ func (c *Client) Events() <-chan transport.Event {
 	return c.events
 }
 
-func (c *Client) Send(recipient, body string) error {
+func (c *Client) Send(envelope protocol.Envelope) error {
 	return c.write(protocol.Message{
 		Type: protocol.MessageTypePublish,
 		Publish: &protocol.PublishRequest{
-			Envelope: protocol.Envelope{
-				SenderMailbox:    c.mailbox,
-				RecipientMailbox: recipient,
-				Body:             body,
-			},
+			Envelope: envelope,
 		},
 	})
 }

@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
 
@@ -14,6 +16,7 @@ type Client struct {
 	RelayURL         string
 	Mailbox          string
 	RecipientMailbox string
+	DataDir          string
 }
 
 type Relay struct {
@@ -38,6 +41,9 @@ func (c Client) Validate() error {
 	if strings.TrimSpace(c.RelayURL) == "" {
 		return fmt.Errorf("relay URL is required")
 	}
+	if strings.TrimSpace(c.DataDir) == "" {
+		return fmt.Errorf("data dir is required")
+	}
 	return nil
 }
 
@@ -46,4 +52,12 @@ func (r Relay) Validate() error {
 		return fmt.Errorf("listen address is required")
 	}
 	return nil
+}
+
+func ClientDataDir(mailbox string) string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return filepath.Join(".", ".chatui", mailbox)
+	}
+	return filepath.Join(home, ".local", "share", "chatui", mailbox)
 }

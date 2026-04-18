@@ -15,11 +15,17 @@ const (
 )
 
 type Envelope struct {
-	ID               string    `json:"id"`
-	SenderMailbox    string    `json:"sender_mailbox"`
-	RecipientMailbox string    `json:"recipient_mailbox"`
-	Body             string    `json:"body"`
-	Timestamp        time.Time `json:"timestamp"`
+	ID                           string    `json:"id"`
+	SenderMailbox                string    `json:"sender_mailbox"`
+	RecipientMailbox             string    `json:"recipient_mailbox"`
+	Body                         string    `json:"body,omitempty"`
+	BodyEncoding                 string    `json:"body_encoding,omitempty"`
+	Ciphertext                   string    `json:"ciphertext,omitempty"`
+	Nonce                        string    `json:"nonce,omitempty"`
+	SenderDeviceSigningPublic    string    `json:"sender_device_signing_public,omitempty"`
+	SenderDeviceEncryptionPublic string    `json:"sender_device_encryption_public,omitempty"`
+	Signature                    string    `json:"signature,omitempty"`
+	Timestamp                    time.Time `json:"timestamp"`
 }
 
 type SubscribeRequest struct {
@@ -93,8 +99,25 @@ func ValidateEnvelope(envelope Envelope) error {
 	if strings.TrimSpace(envelope.RecipientMailbox) == "" {
 		return errors.New("recipient mailbox is required")
 	}
-	if strings.TrimSpace(envelope.Body) == "" {
-		return errors.New("message body is required")
+	if strings.TrimSpace(envelope.Body) == "" && strings.TrimSpace(envelope.Ciphertext) == "" {
+		return errors.New("message body or ciphertext is required")
+	}
+	if strings.TrimSpace(envelope.Ciphertext) != "" {
+		if strings.TrimSpace(envelope.BodyEncoding) == "" {
+			return errors.New("body encoding is required for ciphertext messages")
+		}
+		if strings.TrimSpace(envelope.Nonce) == "" {
+			return errors.New("nonce is required for ciphertext messages")
+		}
+		if strings.TrimSpace(envelope.SenderDeviceSigningPublic) == "" {
+			return errors.New("sender device signing public key is required for ciphertext messages")
+		}
+		if strings.TrimSpace(envelope.SenderDeviceEncryptionPublic) == "" {
+			return errors.New("sender device encryption public key is required for ciphertext messages")
+		}
+		if strings.TrimSpace(envelope.Signature) == "" {
+			return errors.New("signature is required for ciphertext messages")
+		}
 	}
 	return nil
 }

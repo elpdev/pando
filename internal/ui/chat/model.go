@@ -9,12 +9,14 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/elpdev/chatui/internal/messaging"
 	"github.com/elpdev/chatui/internal/protocol"
 	"github.com/elpdev/chatui/internal/transport"
 )
 
 type Deps struct {
 	Client           transport.Client
+	Messaging        *messaging.Service
 	Mailbox          string
 	RecipientMailbox string
 	RelayURL         string
@@ -22,6 +24,7 @@ type Deps struct {
 
 type Model struct {
 	client           transport.Client
+	messaging        *messaging.Service
 	mailbox          string
 	recipientMailbox string
 	relayURL         string
@@ -51,6 +54,7 @@ func New(deps Deps) *Model {
 
 	return &Model{
 		client:           deps.Client,
+		messaging:        deps.Messaging,
 		mailbox:          deps.Mailbox,
 		recipientMailbox: deps.RecipientMailbox,
 		relayURL:         deps.RelayURL,
@@ -58,7 +62,7 @@ func New(deps Deps) *Model {
 		viewport:         vp,
 		status:           fmt.Sprintf("connecting to %s as %s", deps.RelayURL, deps.Mailbox),
 		messages: []string{
-			fmt.Sprintf("Plaintext transport skeleton ready. Target mailbox: %s", deps.RecipientMailbox),
+			fmt.Sprintf("Encrypted chat ready. Target mailbox: %s", deps.RecipientMailbox),
 		},
 		connecting: true,
 	}
@@ -85,10 +89,15 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			if body == "" || m.disconnected {
 				return m, nil
 			}
+			envelope, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
+			if err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
 			m.input.SetValue("")
 			m.syncViewport()
-			return m, m.sendCmd(body)
+			return m, m.sendCmd(envelope)
 		}
 	case clientEventMsg:
 		event := transport.Event(msg)
@@ -144,8 +153,13 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		}
 	case protocol.MessageTypeIncoming:
 		if msg.Incoming != nil {
+			body, err := m.messaging.DecryptIncoming(*msg.Incoming)
+			if err != nil {
+				m.status = fmt.Sprintf("decrypt failed: %v", err)
+				return
+			}
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
-			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, msg.Incoming.Body))
+			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, body))
 			m.syncViewport()
 		}
 	case protocol.MessageTypeError:
@@ -184,8 +198,8 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
-func (m *Model) sendCmd(body string) tea.Cmd {
+func (m *Model) sendCmd(envelope protocol.Envelope) tea.Cmd {
 	return func() tea.Msg {
-		return sendResultMsg{err: m.client.Send(m.recipientMailbox, body)}
+		return sendResultMsg{err: m.client.Send(envelope)}
 	}
 }
