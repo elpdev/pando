@@ -62,6 +62,7 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/up", s.handleHealth)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	return mux
 }

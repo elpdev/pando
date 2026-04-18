@@ -48,6 +48,60 @@ Start the relay:
 go run ./cmd/pando-relay
 ```
 
+## ONCE Packaging
+
+The relay is packaged to fit ONCE's expected runtime shape.
+
+Container behavior:
+
+- serves HTTP on port `80`
+- exposes a healthcheck endpoint at `/up`
+- stores durable relay state in `/storage/relay.db`
+
+Build the image:
+
+```bash
+docker build -t pando-relay .
+```
+
+The Docker build uses the repo's vendored Go dependencies, so it does not need to fetch modules during image build.
+
+On GitHub, every push to `main` also publishes the relay image automatically to GHCR with these tags:
+
+- `ghcr.io/elpdev/pando-relay:latest`
+- `ghcr.io/elpdev/pando-relay:main`
+- `ghcr.io/elpdev/pando-relay:sha-<commit>`
+
+Run it locally like ONCE would:
+
+```bash
+docker run --rm -p 8080:80 -v "$PWD/storage:/storage" pando-relay
+```
+
+Test the healthcheck:
+
+```bash
+curl http://localhost:8080/up
+```
+
+The relay WebSocket endpoint will then be:
+
+```text
+ws://localhost:8080/ws
+```
+
+If you deploy it at `relay.lbp.dev`, your clients should use:
+
+```text
+wss://relay.lbp.dev/ws
+```
+
+If your ONCE deployment supports custom command arguments, you can still override defaults such as auth token or queue limits, for example:
+
+```text
+--auth-token <shared-token> --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120
+```
+
 Optional hardening flags:
 
 ```bash
@@ -69,6 +123,136 @@ go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint
 ```
 
 If you still want file-based exchange, `export-invite` and `import-contact` still work.
+
+## Local Test
+
+Use this when you want to test everything on one machine.
+
+1. Start the relay:
+
+```bash
+go run ./cmd/pando-relay
+```
+
+2. Initialize identities:
+
+```bash
+go run ./cmd/pandoctl init --mailbox alice
+go run ./cmd/pandoctl init --mailbox bob
+```
+
+3. Exchange invite codes:
+
+Alice:
+
+```bash
+go run ./cmd/pandoctl invite-code --mailbox alice --copy
+```
+
+Bob:
+
+```bash
+go run ./cmd/pandoctl invite-code --mailbox bob --copy
+```
+
+Then paste each code into the other side:
+
+```bash
+go run ./cmd/pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
+go run ./cmd/pandoctl add-contact --mailbox bob --code '<alice-invite-code>'
+```
+
+4. Verify fingerprints out of band:
+
+```bash
+go run ./cmd/pandoctl show-contact --mailbox alice --contact bob
+go run ./cmd/pandoctl show-contact --mailbox bob --contact alice
+go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
+go run ./cmd/pandoctl verify-contact --mailbox bob --contact alice --fingerprint <alice-fingerprint>
+```
+
+5. Start both chat clients:
+
+```bash
+go run ./cmd/pando --mailbox alice --to bob
+go run ./cmd/pando --mailbox bob --to alice
+```
+
+6. Test the basics:
+
+- send Alice -> Bob
+- send Bob -> Alice
+- close Bob, send from Alice, reopen Bob, confirm offline delivery
+- stop and restart the relay, then confirm queued delivery still works
+
+## Remote Test
+
+Use this when testing with a friend on another network.
+
+Yes: the relay must be reachable by both people. If you host it at `relay.lbp.dev`, both clients need to connect to that public relay URL.
+
+1. Run the relay on a public host:
+
+```bash
+go run ./cmd/pando-relay --addr ":8080"
+```
+
+2. Put it behind a public endpoint such as:
+
+```text
+ws://relay.lbp.dev/ws
+```
+
+If you terminate TLS, use:
+
+```text
+wss://relay.lbp.dev/ws
+```
+
+3. Give both people the same relay URL. If you want a private relay, also set a shared token:
+
+```bash
+go run ./cmd/pando-relay --auth-token '<shared-token>'
+```
+
+4. Each person initializes locally on their own machine:
+
+```bash
+go run ./cmd/pandoctl init --mailbox alice
+go run ./cmd/pandoctl init --mailbox bob
+```
+
+5. Exchange invite codes over a channel you already trust enough to compare fingerprints afterward.
+
+6. Import and verify:
+
+```bash
+go run ./cmd/pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
+go run ./cmd/pandoctl add-contact --mailbox bob --code '<alice-invite-code>'
+go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
+go run ./cmd/pandoctl verify-contact --mailbox bob --contact alice --fingerprint <alice-fingerprint>
+```
+
+7. Start the clients against the public relay:
+
+```bash
+go run ./cmd/pando --mailbox alice --to bob --relay wss://relay.lbp.dev/ws
+go run ./cmd/pando --mailbox bob --to alice --relay wss://relay.lbp.dev/ws
+```
+
+With relay auth enabled:
+
+```bash
+go run ./cmd/pando --mailbox alice --to bob --relay wss://relay.lbp.dev/ws --relay-token '<shared-token>'
+go run ./cmd/pando --mailbox bob --to alice --relay wss://relay.lbp.dev/ws --relay-token '<shared-token>'
+```
+
+## Notes
+
+- The relay only sees mailbox identifiers and ciphertext for encrypted chat messages.
+- Fingerprint verification is what protects against importing the wrong contact bundle.
+- For internet-facing use, prefer `wss://` instead of `ws://`.
+- If you run the relay on `relay.lbp.dev`, make sure your reverse proxy forwards WebSocket upgrades to `/ws`.
 
 Enroll a second trusted device for Alice:
 
