@@ -1,11 +1,15 @@
 package ctlcmd
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
+	"strings"
 
+	"github.com/atotto/clipboard"
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
@@ -13,7 +17,7 @@ import (
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl <init|show-identity|export-invite|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device> [flags]")
+		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device> [flags]")
 	}
 
 	switch args[0] {
@@ -21,8 +25,12 @@ func Execute(args []string) error {
 		return runInit(args[1:])
 	case "show-identity":
 		return runShowIdentity(args[1:])
+	case "invite-code":
+		return runInviteCode(args[1:])
 	case "export-invite":
 		return runExportInvite(args[1:])
+	case "add-contact":
+		return runAddContact(args[1:])
 	case "import-contact":
 		return runImportContact(args[1:])
 	case "list-contacts":
@@ -117,12 +125,12 @@ func runExportInvite(args []string) error {
 	return os.WriteFile(*outputPath, bytes, 0o600)
 }
 
-func runImportContact(args []string) error {
-	fs := flag.NewFlagSet("import-contact", flag.ContinueOnError)
+func runInviteCode(args []string) error {
+	fs := flag.NewFlagSet("invite-code", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	dataDir := fs.String("data-dir", "", "client state directory")
-	invitePath := fs.String("invite", "", "path to invite bundle JSON")
+	copyToClipboard := fs.Bool("copy", false, "copy the invite code to the clipboard")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -130,23 +138,62 @@ func runImportContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if *invitePath == "" {
-		return fmt.Errorf("-invite is required")
+	clientStore := store.NewClientStore(resolvedDataDir)
+	id, _, err := clientStore.LoadOrCreateIdentity(*mailbox)
+	if err != nil {
+		return err
+	}
+	code, err := encodeInviteCode(id.InviteBundle())
+	if err != nil {
+		return err
+	}
+	if *copyToClipboard {
+		if err := clipboard.WriteAll(code); err != nil {
+			return fmt.Errorf("copy invite code: %w", err)
+		}
+		fmt.Printf("copied invite code for %s to clipboard\n", id.AccountID)
+	}
+	fmt.Printf("account: %s\n", id.AccountID)
+	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+	fmt.Printf("invite-code: %s\n", code)
+	return nil
+}
+
+func runAddContact(args []string) error {
+	return runImportContactWithName("add-contact", args)
+}
+
+func runImportContact(args []string) error {
+	return runImportContactWithName("import-contact", args)
+}
+
+func runImportContactWithName(name string, args []string) error {
+	fs := flag.NewFlagSet(name, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	mailbox := fs.String("mailbox", "", "local mailbox identifier")
+	dataDir := fs.String("data-dir", "", "client state directory")
+	invitePath := fs.String("invite", "", "path to invite bundle JSON")
+	inviteCode := fs.String("code", "", "shareable invite code")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	resolvedDataDir, err := resolveDataDir(*mailbox, *dataDir)
+	if err != nil {
+		return err
+	}
+	if *invitePath == "" && strings.TrimSpace(*inviteCode) == "" {
+		return fmt.Errorf("either -invite or -code is required")
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
 	_, _, err = clientStore.LoadOrCreateIdentity(*mailbox)
 	if err != nil {
 		return err
 	}
-	bytes, err := os.ReadFile(*invitePath)
+	bundle, err := readInviteBundle(*invitePath, *inviteCode)
 	if err != nil {
 		return err
 	}
-	var bundle identity.InviteBundle
-	if err := json.Unmarshal(bytes, &bundle); err != nil {
-		return fmt.Errorf("decode invite: %w", err)
-	}
-	contact, err := identity.ContactFromInvite(bundle)
+	contact, err := identity.ContactFromInvite(*bundle)
 	if err != nil {
 		return err
 	}
@@ -471,4 +518,50 @@ func writeJSON(file *os.File, value any) error {
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
+}
+
+func encodeInviteCode(bundle identity.InviteBundle) (string, error) {
+	bytes, err := json.Marshal(bundle)
+	if err != nil {
+		return "", fmt.Errorf("encode invite code: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(bytes), nil
+}
+
+func decodeInviteCode(code string) (*identity.InviteBundle, error) {
+	bytes, err := base64.RawURLEncoding.DecodeString(strings.TrimSpace(code))
+	if err != nil {
+		return nil, fmt.Errorf("decode invite code: %w", err)
+	}
+	var bundle identity.InviteBundle
+	if err := json.Unmarshal(bytes, &bundle); err != nil {
+		return nil, fmt.Errorf("decode invite bundle: %w", err)
+	}
+	return &bundle, nil
+}
+
+func readInviteBundle(invitePath, inviteCode string) (*identity.InviteBundle, error) {
+	if strings.TrimSpace(inviteCode) != "" {
+		return decodeInviteCode(inviteCode)
+	}
+	if invitePath == "-" {
+		bytes, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return nil, fmt.Errorf("read invite from stdin: %w", err)
+		}
+		var bundle identity.InviteBundle
+		if err := json.Unmarshal(bytes, &bundle); err != nil {
+			return nil, fmt.Errorf("decode invite: %w", err)
+		}
+		return &bundle, nil
+	}
+	bytes, err := os.ReadFile(invitePath)
+	if err != nil {
+		return nil, err
+	}
+	var bundle identity.InviteBundle
+	if err := json.Unmarshal(bytes, &bundle); err != nil {
+		return nil, fmt.Errorf("decode invite: %w", err)
+	}
+	return &bundle, nil
 }

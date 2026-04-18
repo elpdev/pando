@@ -17,6 +17,7 @@ Current scope:
 - Automatic contact device-bundle refresh during normal messaging
 - Duplicate suppression for replayed relay envelopes
 - Delivery acknowledgements reflected in local chat history
+- Shareable invite codes for simpler secure onboarding
 
 ## Project Shape
 
@@ -53,19 +54,21 @@ Optional hardening flags:
 go run ./cmd/pando-relay --ttl 24h --max-message-bytes 65536 --rate-limit-per-minute 120 --auth-token secret-token
 ```
 
-Initialize Alice and Bob locally and exchange invites:
+Initialize Alice and Bob locally and exchange invite codes:
 
 ```bash
 go run ./cmd/pandoctl --help
 go run ./cmd/pandoctl init --mailbox alice
 go run ./cmd/pandoctl init --mailbox bob
-go run ./cmd/pandoctl export-invite --mailbox alice --out /tmp/alice-invite.json
-go run ./cmd/pandoctl export-invite --mailbox bob --out /tmp/bob-invite.json
-go run ./cmd/pandoctl import-contact --mailbox alice --invite /tmp/bob-invite.json
-go run ./cmd/pandoctl import-contact --mailbox bob --invite /tmp/alice-invite.json
+go run ./cmd/pandoctl invite-code --mailbox alice --copy
+go run ./cmd/pandoctl invite-code --mailbox bob --copy
+go run ./cmd/pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
+go run ./cmd/pandoctl add-contact --mailbox bob --code '<alice-invite-code>'
 go run ./cmd/pandoctl list-contacts --mailbox alice
 go run ./cmd/pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
+
+If you still want file-based exchange, `export-invite` and `import-contact` still work.
 
 Enroll a second trusted device for Alice:
 
