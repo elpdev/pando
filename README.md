@@ -79,11 +79,15 @@ Every push to `main` also creates:
 - a matching GitHub Release
 - attached release binaries for Linux, macOS, and Windows
 
+GitHub Release notes are generated automatically from the commits since the previous version tag.
+
 Version bumps follow conventional commits since the previous tag:
 
 - `feat:` bumps the minor version
 - `fix:`, `docs:`, `chore:`, `refactor:`, `test:` and other non-breaking commits bump the patch version
 - `!` in the type line or `BREAKING CHANGE:` in the body bumps the major version
+
+Doc-only and repository-metadata-only pushes are skipped and do not create a release.
 
 The relay image is published as a multi-arch container for:
 
