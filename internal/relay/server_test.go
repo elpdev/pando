@@ -85,7 +85,7 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
-	server := httptest.NewServer(NewServer(logger).Handler())
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore()).Handler())
 	t.Cleanup(server.Close)
 	return server
 }

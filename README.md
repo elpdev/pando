@@ -4,7 +4,7 @@ First vertical slice for a terminal-native chat client and relay in Go.
 
 Current scope:
 
-- WebSocket relay with in-memory mailbox delivery
+- WebSocket relay with durable mailbox delivery
 - Bubble Tea shell app with a dedicated chat route model
 - Invite-based contact exchange and verified device bundles
 - Encrypted 1:1 message envelopes between mailbox IDs
@@ -62,11 +62,9 @@ Open another terminal for Bob:
 go run ./cmd/chatui --mailbox bob --to alice
 ```
 
-If Bob is offline when Alice sends a message, the relay will keep that ciphertext in memory and deliver it when Bob subscribes.
+If Bob is offline when Alice sends a message, the relay will keep that ciphertext in its local queue store and deliver it when Bob subscribes.
 
 ## Current Limitations
 
-- No durable relay persistence yet
 - No trusted multi-device enrollment or revocation yet
 - No encrypted local history yet
-- Offline queue is in-memory only and disappears when the relay stops
