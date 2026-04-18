@@ -37,6 +37,39 @@ pandoctl list-contacts --mailbox alice
 pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
 
+### Fastest way to connect
+
+The easiest invite flows are:
+
+1. Copy and paste the raw invite code:
+
+```bash
+pandoctl invite-code --mailbox leo --raw
+pandoctl add-contact --mailbox alice --paste
+```
+
+2. Use the clipboard directly:
+
+```bash
+pandoctl invite-code --mailbox leo --copy
+pandoctl add-contact --mailbox alice --from-clipboard
+```
+
+3. Pipe the invite code between local shells:
+
+```bash
+pandoctl invite-code --mailbox leo --raw | pandoctl add-contact --mailbox alice --stdin
+```
+
+4. Share or scan a QR code in the terminal:
+
+```bash
+pandoctl invite-code --mailbox leo --qr
+pandoctl add-contact --mailbox alice --qr-image /path/to/invite-qr.png
+```
+
+`pandoctl add-contact --paste` also accepts the full multiline output from `pandoctl invite-code` and extracts the `invite-code:` value automatically.
+
 Start the client:
 
 ```bash

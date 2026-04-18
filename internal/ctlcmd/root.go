@@ -6,14 +6,21 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"image"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/atotto/clipboard"
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
+	"github.com/makiuchi-d/gozxing"
+	gozxingqr "github.com/makiuchi-d/gozxing/qrcode"
+	qrterminal "github.com/mdp/qrterminal/v3"
+	_ "image/jpeg"
+	_ "image/png"
 )
 
 func Execute(args []string) error {
@@ -138,8 +145,13 @@ func runInviteCode(args []string) error {
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	dataDir := fs.String("data-dir", "", "client state directory")
 	copyToClipboard := fs.Bool("copy", false, "copy the invite code to the clipboard")
+	rawOutput := fs.Bool("raw", false, "print only the invite code")
+	qrOutput := fs.Bool("qr", false, "render the invite code as a terminal QR code")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if *rawOutput && *qrOutput {
+		return fmt.Errorf("use only one of -raw or -qr")
 	}
 	resolvedDataDir, err := resolveDataDir(*mailbox, *rootDir, *dataDir)
 	if err != nil {
@@ -159,10 +171,24 @@ func runInviteCode(args []string) error {
 			return fmt.Errorf("copy invite code: %w", err)
 		}
 		fmt.Printf("copied invite code for %s to clipboard\n", id.AccountID)
+		fmt.Println("tell the other person to run: pandoctl add-contact --mailbox <their-mailbox> --from-clipboard")
+	}
+	if *rawOutput {
+		fmt.Println(code)
+		return nil
+	}
+	if *qrOutput {
+		fmt.Printf("account: %s\n", id.AccountID)
+		fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+		qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stdout)
+		fmt.Println("share this QR or import a saved QR image with: pandoctl add-contact --mailbox <their-mailbox> --qr-image <path>")
+		return nil
 	}
 	fmt.Printf("account: %s\n", id.AccountID)
 	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 	fmt.Printf("invite-code: %s\n", code)
+	fmt.Println("share the invite-code value above, or use --raw, --copy, or --qr for easier sharing")
+	fmt.Println("the other person can import it with: pandoctl add-contact --mailbox <their-mailbox> --paste")
 	return nil
 }
 
@@ -182,6 +208,10 @@ func runImportContactWithName(name string, args []string) error {
 	dataDir := fs.String("data-dir", "", "client state directory")
 	invitePath := fs.String("invite", "", "path to invite bundle JSON")
 	inviteCode := fs.String("code", "", "shareable invite code")
+	readStdin := fs.Bool("stdin", false, "read invite code or invite JSON from stdin")
+	readPaste := fs.Bool("paste", false, "read a pasted invite from stdin until EOF")
+	fromClipboard := fs.Bool("from-clipboard", false, "read the invite code from the clipboard")
+	qrImagePath := fs.String("qr-image", "", "path to a QR image containing an invite code")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -189,15 +219,22 @@ func runImportContactWithName(name string, args []string) error {
 	if err != nil {
 		return err
 	}
-	if *invitePath == "" && strings.TrimSpace(*inviteCode) == "" {
-		return fmt.Errorf("either -invite or -code is required")
+	if err := validateInviteInputFlags(*invitePath, *inviteCode, *readStdin, *readPaste, *fromClipboard, *qrImagePath); err != nil {
+		return err
 	}
 	clientStore := store.NewClientStore(resolvedDataDir)
 	_, _, err = clientStore.LoadOrCreateIdentity(*mailbox)
 	if err != nil {
 		return err
 	}
-	bundle, err := readInviteBundle(*invitePath, *inviteCode)
+	bundle, err := readInviteBundle(inviteInputOptions{
+		InvitePath:    *invitePath,
+		InviteCode:    *inviteCode,
+		ReadStdin:     *readStdin,
+		ReadPaste:     *readPaste,
+		ReadClipboard: *fromClipboard,
+		QRImagePath:   *qrImagePath,
+	})
 	if err != nil {
 		return err
 	}
@@ -212,6 +249,46 @@ func runImportContactWithName(name string, args []string) error {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
+	fmt.Printf("fingerprint: %s\n", contact.Fingerprint())
+	fmt.Printf("next: pandoctl verify-contact --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
+	return nil
+}
+
+type inviteInputOptions struct {
+	InvitePath    string
+	InviteCode    string
+	ReadStdin     bool
+	ReadPaste     bool
+	ReadClipboard bool
+	QRImagePath   string
+}
+
+func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPaste, fromClipboard bool, qrImagePath string) error {
+	inputs := 0
+	if strings.TrimSpace(invitePath) != "" {
+		inputs++
+	}
+	if strings.TrimSpace(inviteCode) != "" {
+		inputs++
+	}
+	if readStdin {
+		inputs++
+	}
+	if readPaste {
+		inputs++
+	}
+	if fromClipboard {
+		inputs++
+	}
+	if strings.TrimSpace(qrImagePath) != "" {
+		inputs++
+	}
+	if inputs == 0 {
+		return fmt.Errorf("provide one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
+	}
+	if inputs > 1 {
+		return fmt.Errorf("use only one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
+	}
 	return nil
 }
 
@@ -673,28 +750,93 @@ func decodeInviteCode(code string) (*identity.InviteBundle, error) {
 	return &bundle, nil
 }
 
-func readInviteBundle(invitePath, inviteCode string) (*identity.InviteBundle, error) {
-	if strings.TrimSpace(inviteCode) != "" {
-		return decodeInviteCode(inviteCode)
-	}
-	if invitePath == "-" {
+func readInviteBundle(input inviteInputOptions) (*identity.InviteBundle, error) {
+	switch {
+	case strings.TrimSpace(input.InviteCode) != "":
+		return decodeInviteText(input.InviteCode)
+	case input.ReadClipboard:
+		text, err := clipboard.ReadAll()
+		if err != nil {
+			return nil, fmt.Errorf("read invite from clipboard: %w", err)
+		}
+		return decodeInviteText(text)
+	case strings.TrimSpace(input.QRImagePath) != "":
+		return readInviteBundleFromQRImage(input.QRImagePath)
+	case input.ReadStdin || input.ReadPaste || input.InvitePath == "-":
+		if input.ReadPaste {
+			fmt.Fprintln(os.Stderr, "paste the invite, then press Ctrl-D when finished:")
+		}
 		bytes, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			return nil, fmt.Errorf("read invite from stdin: %w", err)
 		}
-		var bundle identity.InviteBundle
-		if err := json.Unmarshal(bytes, &bundle); err != nil {
-			return nil, fmt.Errorf("decode invite: %w", err)
+		return decodeInviteText(string(bytes))
+	case strings.TrimSpace(input.InvitePath) != "":
+		bytes, err := os.ReadFile(input.InvitePath)
+		if err != nil {
+			return nil, err
 		}
-		return &bundle, nil
+		return decodeInviteText(string(bytes))
+	default:
+		return nil, fmt.Errorf("provide one of -invite, -code, -stdin, -paste, -from-clipboard, or -qr-image")
 	}
-	bytes, err := os.ReadFile(invitePath)
+}
+
+func readInviteBundleFromQRImage(path string) (*identity.InviteBundle, error) {
+	file, err := os.Open(path)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("open QR image: %w", err)
+	}
+	defer file.Close()
+	img, _, err := image.Decode(file)
+	if err != nil {
+		return nil, fmt.Errorf("decode QR image: %w", err)
+	}
+	bitmap, err := gozxing.NewBinaryBitmapFromImage(img)
+	if err != nil {
+		return nil, fmt.Errorf("read QR image: %w", err)
+	}
+	result, err := gozxingqr.NewQRCodeReader().Decode(bitmap, nil)
+	if err != nil {
+		return nil, fmt.Errorf("read QR image: %w", err)
+	}
+	return decodeInviteText(result.GetText())
+}
+
+func decodeInviteText(text string) (*identity.InviteBundle, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil, fmt.Errorf("invite input is empty")
+	}
+	if bundle, err := decodeInviteCode(extractInviteCode(trimmed)); err == nil {
+		return bundle, nil
 	}
 	var bundle identity.InviteBundle
-	if err := json.Unmarshal(bytes, &bundle); err != nil {
-		return nil, fmt.Errorf("decode invite: %w", err)
+	if err := json.Unmarshal([]byte(trimmed), &bundle); err == nil {
+		return &bundle, nil
 	}
-	return &bundle, nil
+	code := extractInviteCode(trimmed)
+	decoded, err := decodeInviteCode(code)
+	if err == nil {
+		return decoded, nil
+	}
+	return nil, fmt.Errorf("decode invite input: %w; try the value after 'invite-code:' or use pandoctl invite-code --raw", err)
+}
+
+var inviteCodePattern = regexp.MustCompile(`(?m)invite-code:\s*([A-Za-z0-9_-]+)`)
+
+func extractInviteCode(text string) string {
+	if matches := inviteCodePattern.FindStringSubmatch(text); len(matches) == 2 {
+		return strings.TrimSpace(matches[1])
+	}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, " ") || strings.Contains(line, ":") {
+			continue
+		}
+		if _, err := base64.RawURLEncoding.DecodeString(line); err == nil {
+			return line
+		}
+	}
+	return strings.TrimSpace(text)
 }
