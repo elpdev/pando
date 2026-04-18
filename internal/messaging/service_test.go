@@ -198,6 +198,20 @@ func TestDeliveryAckMarksSentHistoryDelivered(t *testing.T) {
 	}
 }
 
+func TestEncryptOutgoingMissingContactSuggestsImportCommand(t *testing.T) {
+	service, _, err := New(store.NewClientStore(t.TempDir()), "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, err = service.EncryptOutgoing("bob", "hello")
+	if err == nil {
+		t.Fatal("expected missing contact error")
+	}
+	if !strings.Contains(err.Error(), "pandoctl add-contact --mailbox <your-mailbox> --paste") {
+		t.Fatalf("expected import guidance, got %v", err)
+	}
+}
+
 func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := New(aliceStore, "alice")

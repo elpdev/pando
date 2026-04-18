@@ -169,6 +169,7 @@ func runInviteCode(args []string) error {
 			return fmt.Errorf("copy invite code: %w", err)
 		}
 		fmt.Printf("copied invite code for %s to clipboard\n", id.AccountID)
+		fmt.Println("tell the other person to run: pandoctl add-contact --mailbox <their-mailbox> --from-clipboard")
 	}
 	if *rawOutput {
 		fmt.Println(code)
@@ -178,13 +179,14 @@ func runInviteCode(args []string) error {
 		fmt.Printf("account: %s\n", id.AccountID)
 		fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 		qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stdout)
-		fmt.Println("scan this QR or import a saved image with pandoctl add-contact --qr-image <path>")
+		fmt.Println("share this QR or import a saved QR image with: pandoctl add-contact --mailbox <their-mailbox> --qr-image <path>")
 		return nil
 	}
 	fmt.Printf("account: %s\n", id.AccountID)
 	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 	fmt.Printf("invite-code: %s\n", code)
-	fmt.Println("share the invite-code value above, or use --raw / --copy for easier sharing")
+	fmt.Println("share the invite-code value above, or use --raw, --copy, or --qr for easier sharing")
+	fmt.Println("the other person can import it with: pandoctl add-contact --mailbox <their-mailbox> --paste")
 	return nil
 }
 
@@ -245,6 +247,8 @@ func runImportContactWithName(name string, args []string) error {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
+	fmt.Printf("fingerprint: %s\n", contact.Fingerprint())
+	fmt.Printf("next: pandoctl verify-contact --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
 	return nil
 }
 

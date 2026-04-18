@@ -107,7 +107,7 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBat
 	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return nil, fmt.Errorf("no contact for account %q; import an updated invite first", recipientAccountID)
+			return nil, missingContactError(recipientAccountID)
 		}
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*Outgoi
 	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
 		if err == store.ErrNotFound {
-			return nil, "", fmt.Errorf("no contact for account %q; import an updated invite first", recipientAccountID)
+			return nil, "", missingContactError(recipientAccountID)
 		}
 		return nil, "", err
 	}
@@ -169,6 +169,10 @@ func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*Outgoi
 		envelopes = append(envelopes, chunkEnvelopes...)
 	}
 	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("photo sent: %s", sanitizeAttachmentName(filename)), nil
+}
+
+func missingContactError(recipientAccountID string) error {
+	return fmt.Errorf("no contact for account %q; import their invite first with pandoctl add-contact --mailbox <your-mailbox> --paste", recipientAccountID)
 }
 
 func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, error) {

@@ -226,6 +226,23 @@ func TestRunInviteCodeRaw(t *testing.T) {
 	}
 }
 
+func TestRunInviteCodeDefaultShowsNextStep(t *testing.T) {
+	dataDir := t.TempDir()
+	clientStore := store.NewClientStore(dataDir)
+	if _, _, err := clientStore.LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := runInviteCode([]string{"-mailbox", "alice", "-data-dir", dataDir}); err != nil {
+			t.Fatalf("run invite code: %v", err)
+		}
+	})
+	if !strings.Contains(output, "the other person can import it with: pandoctl add-contact --mailbox <their-mailbox> --paste") {
+		t.Fatalf("expected next-step guidance in output, got %q", output)
+	}
+}
+
 func TestReadInviteBundleFromQRImage(t *testing.T) {
 	id, err := identity.New("alice")
 	if err != nil {
