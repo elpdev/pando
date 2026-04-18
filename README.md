@@ -75,9 +75,15 @@ On GitHub, every push to `main` also publishes the relay image automatically to 
 
 Every push to `main` also creates:
 
-- a semver git tag such as `v0.1.0`, `v0.1.1`, `v0.1.2`
+- a semver git tag such as `v0.1.0`, `v0.2.0`, `v1.0.0`
 - a matching GitHub Release
 - attached release binaries for Linux, macOS, and Windows
+
+Version bumps follow conventional commits since the previous tag:
+
+- `feat:` bumps the minor version
+- `fix:`, `docs:`, `chore:`, `refactor:`, `test:` and other non-breaking commits bump the patch version
+- `!` in the type line or `BREAKING CHANGE:` in the body bumps the major version
 
 The relay image is published as a multi-arch container for:
 

@@ -31,14 +31,46 @@ jobs:
         run: |
           latest_tag="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
           if [[ -z "$latest_tag" ]]; then
-            next_tag="v0.1.0"
+            current_major=0
+            current_minor=0
+            current_patch=0
+            commit_range="${GITHUB_SHA}"
           else
             version="${latest_tag#v}"
-            IFS='.' read -r major minor patch <<< "$version"
-            next_patch=$((patch + 1))
-            next_tag="v${major}.${minor}.${next_patch}"
+            IFS='.' read -r current_major current_minor current_patch <<< "$version"
+            commit_range="${latest_tag}..${GITHUB_SHA}"
           fi
+
+          bump="patch"
+          while IFS= read -r commit; do
+            [[ -z "$commit" ]] && continue
+            if [[ "$commit" == *"BREAKING CHANGE:"* ]] || [[ "$commit" =~ ^[a-zA-Z]+(\([^)]+\))?!: ]]; then
+              bump="major"
+              break
+            fi
+            if [[ "$commit" =~ ^feat(\([^)]+\))?: ]]; then
+              bump="minor"
+            fi
+          done < <(git log --format='%s%n%b' "$commit_range")
+
+          case "$bump" in
+            major)
+              next_tag="v$((current_major + 1)).0.0"
+              ;;
+            minor)
+              next_tag="v${current_major}.$((current_minor + 1)).0"
+              ;;
+            *)
+              if [[ -z "$latest_tag" ]]; then
+                next_tag="v0.1.0"
+              else
+                next_tag="v${current_major}.${current_minor}.$((current_patch + 1))"
+              fi
+              ;;
+          esac
+
           echo "tag=${next_tag}" >> "$GITHUB_OUTPUT"
+          echo "bump=${bump}" >> "$GITHUB_OUTPUT"
 
       - name: Create git tag
         env:
@@ -96,7 +128,7 @@ jobs:
           gh release create "${{ steps.version.outputs.tag }}" \
             --target "${GITHUB_SHA}" \
             --title "${{ steps.version.outputs.tag }}" \
-            --notes "Automated release for ${GITHUB_SHA}."
+            --notes "Automated ${{ steps.version.outputs.bump }} release for ${GITHUB_SHA}."
 
       - name: Upload release binaries
         env:
