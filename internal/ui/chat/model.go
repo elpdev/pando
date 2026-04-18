@@ -116,6 +116,22 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.status = "relay is not connected; waiting to reconnect"
 				return m, nil
 			}
+			if strings.HasPrefix(body, "/send-photo") {
+				path := strings.TrimSpace(strings.TrimPrefix(body, "/send-photo"))
+				if path == "" {
+					m.status = "usage: /send-photo <path>"
+					return m, nil
+				}
+				batch, displayBody, err := m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
+				if err != nil {
+					m.status = err.Error()
+					return m, nil
+				}
+				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+				m.input.SetValue("")
+				m.syncViewport()
+				return m, m.sendCmd(displayBody, batch)
+			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
 				m.status = err.Error()
@@ -212,6 +228,14 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			if result == nil || result.Duplicate {
 				return
 			}
+			if len(result.AckEnvelopes) != 0 {
+				for _, envelope := range result.AckEnvelopes {
+					if err := m.client.Send(envelope); err != nil {
+						m.status = fmt.Sprintf("delivery ack failed: %v", err)
+						break
+					}
+				}
+			}
 			if result.ContactUpdated != nil && result.ContactUpdated.AccountID == m.recipientMailbox {
 				m.peerFingerprint = result.ContactUpdated.Fingerprint()
 				m.peerVerified = result.ContactUpdated.Verified
@@ -232,14 +256,6 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
 			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
 			m.syncViewport()
-			if len(result.AckEnvelopes) != 0 {
-				for _, envelope := range result.AckEnvelopes {
-					if err := m.client.Send(envelope); err != nil {
-						m.status = fmt.Sprintf("delivery ack failed: %v", err)
-						break
-					}
-				}
-			}
 		}
 	case protocol.MessageTypeError:
 		if msg.Error != nil {
