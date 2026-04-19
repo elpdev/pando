@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/session"
 	"github.com/elpdev/pando/internal/store"
@@ -75,6 +76,31 @@ func (s *Service) Contact(mailbox string) (*identity.Contact, error) {
 
 func (s *Service) Contacts() ([]identity.Contact, error) {
 	return s.store.ListContacts()
+}
+
+func (s *Service) ImportContactInviteText(text string, verified bool) (*identity.Contact, error) {
+	bundle, err := invite.DecodeText(text)
+	if err != nil {
+		return nil, err
+	}
+	return s.ImportContactInviteBundle(*bundle, verified)
+}
+
+func (s *Service) ImportContactInviteBundle(bundle identity.InviteBundle, verified bool) (*identity.Contact, error) {
+	contact, err := identity.ContactFromInvite(bundle)
+	if err != nil {
+		return nil, err
+	}
+	if existing, loadErr := s.store.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
+		contact.Verified = existing.Verified
+	}
+	if verified {
+		contact.Verified = true
+	}
+	if err := s.store.SaveContact(contact); err != nil {
+		return nil, err
+	}
+	return contact, nil
 }
 
 func (s *Service) Devices() ([]identity.Device, error) {
