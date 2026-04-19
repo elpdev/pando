@@ -31,7 +31,9 @@ type Envelope struct {
 }
 
 type SubscribeRequest struct {
-	Mailbox string `json:"mailbox"`
+	Mailbox          string `json:"mailbox"`
+	DeviceSigningKey string `json:"device_signing_key,omitempty"`
+	DeviceProof      string `json:"device_proof,omitempty"`
 }
 
 type PublishRequest struct {
@@ -64,6 +66,12 @@ func (m Message) Validate() error {
 		if strings.TrimSpace(m.Subscribe.Mailbox) == "" {
 			return errors.New("mailbox is required")
 		}
+		if strings.TrimSpace(m.Subscribe.DeviceSigningKey) == "" {
+			return errors.New("device signing key is required")
+		}
+		if strings.TrimSpace(m.Subscribe.DeviceProof) == "" {
+			return errors.New("device proof is required")
+		}
 	case MessageTypePublish:
 		if m.Publish == nil {
 			return errors.New("publish payload is required")
@@ -92,6 +100,10 @@ func (m Message) Validate() error {
 
 	return nil
 
+}
+
+func SubscribeProofBytes(mailbox string) []byte {
+	return []byte("subscribe\n" + mailbox)
 }
 
 func ValidateEnvelope(envelope Envelope) error {

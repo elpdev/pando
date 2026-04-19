@@ -59,7 +59,7 @@ func Execute(args []string) error {
 	if err != nil {
 		return err
 	}
-	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, cfg.Mailbox)
+	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, service.Identity())
 	chatModel := chat.New(chat.Deps{
 		Client:           client,
 		Messaging:        service,

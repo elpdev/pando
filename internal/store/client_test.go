@@ -28,3 +28,13 @@ func TestMarkContactVerified(t *testing.T) {
 		t.Fatalf("expected contact to be verified")
 	}
 }
+
+func TestSaveAttachmentRejectsTraversalComponents(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	if _, err := clientStore.SaveAttachment("../bob", "file-1", "photo.png", []byte("hello")); err == nil {
+		t.Fatal("expected traversal mailbox to be rejected")
+	}
+	if _, err := clientStore.SaveAttachment("bob", "../file-1", "photo.png", []byte("hello")); err == nil {
+		t.Fatal("expected traversal attachment id to be rejected")
+	}
+}

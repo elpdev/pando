@@ -1,7 +1,9 @@
 package relay
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,26 +15,44 @@ import (
 )
 
 var queueBucket = []byte("mailboxes")
+var mailboxClaimBucket = []byte("mailbox_claims")
+
+var ErrQueueFull = errors.New("mailbox queue is full")
+var ErrMailboxClaimConflict = errors.New("mailbox is already claimed by a different device key")
 
 type QueueStore interface {
 	Enqueue(protocol.Envelope) error
 	Drain(mailbox string) ([]protocol.Envelope, error)
+	ClaimMailbox(mailbox string, signingPublic []byte) error
+	MailboxOwner(mailbox string) ([]byte, error)
 	Close() error
 }
 
 type MemoryQueueStore struct {
 	mu        sync.Mutex
 	mailboxes map[string][]protocol.Envelope
+	claims    map[string][]byte
+	limits    QueueLimits
 }
 
 func NewMemoryQueueStore() *MemoryQueueStore {
-	return &MemoryQueueStore{mailboxes: make(map[string][]protocol.Envelope)}
+	return &MemoryQueueStore{mailboxes: make(map[string][]protocol.Envelope), claims: make(map[string][]byte)}
+}
+
+func (s *MemoryQueueStore) SetLimits(limits QueueLimits) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.limits = limits
 }
 
 func (s *MemoryQueueStore) Enqueue(envelope protocol.Envelope) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.mailboxes[envelope.RecipientMailbox] = append(s.mailboxes[envelope.RecipientMailbox], envelope)
+	queue := filterExpired(append([]protocol.Envelope(nil), s.mailboxes[envelope.RecipientMailbox]...), time.Now().UTC())
+	if err := validateQueueLimits(queue, envelope, s.limits); err != nil {
+		return err
+	}
+	s.mailboxes[envelope.RecipientMailbox] = append(queue, envelope)
 	return nil
 }
 
@@ -48,8 +68,33 @@ func (s *MemoryQueueStore) Close() error {
 	return nil
 }
 
+func (s *MemoryQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing := s.claims[mailbox]
+	if len(existing) == 0 {
+		s.claims[mailbox] = append([]byte(nil), signingPublic...)
+		return nil
+	}
+	if bytes.Equal(existing, signingPublic) {
+		return nil
+	}
+	return ErrMailboxClaimConflict
+}
+
+func (s *MemoryQueueStore) MailboxOwner(mailbox string) ([]byte, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	owner := s.claims[mailbox]
+	if len(owner) == 0 {
+		return nil, nil
+	}
+	return append([]byte(nil), owner...), nil
+}
+
 type BoltQueueStore struct {
-	db *bbolt.DB
+	db     *bbolt.DB
+	limits QueueLimits
 }
 
 func NewBoltQueueStore(path string) (*BoltQueueStore, error) {
@@ -62,12 +107,20 @@ func NewBoltQueueStore(path string) (*BoltQueueStore, error) {
 	}
 	if err := db.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(queueBucket)
+		if err != nil {
+			return err
+		}
+		_, err = tx.CreateBucketIfNotExists(mailboxClaimBucket)
 		return err
 	}); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("initialize relay store: %w", err)
 	}
 	return &BoltQueueStore{db: db}, nil
+}
+
+func (s *BoltQueueStore) SetLimits(limits QueueLimits) {
+	s.limits = limits
 }
 
 func (s *BoltQueueStore) Enqueue(envelope protocol.Envelope) error {
@@ -81,6 +134,9 @@ func (s *BoltQueueStore) Enqueue(envelope protocol.Envelope) error {
 			}
 		}
 		queue = filterExpired(queue, time.Now().UTC())
+		if err := validateQueueLimits(queue, envelope, s.limits); err != nil {
+			return err
+		}
 		queue = append(queue, envelope)
 		bytes, err := json.Marshal(queue)
 		if err != nil {
@@ -114,6 +170,37 @@ func (s *BoltQueueStore) Drain(mailbox string) ([]protocol.Envelope, error) {
 	return backlog, nil
 }
 
+func (s *BoltQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) error {
+	return s.db.Update(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(mailboxClaimBucket)
+		key := []byte(mailbox)
+		existing := bucket.Get(key)
+		if len(existing) == 0 {
+			return bucket.Put(key, append([]byte(nil), signingPublic...))
+		}
+		if bytes.Equal(existing, signingPublic) {
+			return nil
+		}
+		return ErrMailboxClaimConflict
+	})
+}
+
+func (s *BoltQueueStore) MailboxOwner(mailbox string) ([]byte, error) {
+	var owner []byte
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		bucket := tx.Bucket(mailboxClaimBucket)
+		owner = append([]byte(nil), bucket.Get([]byte(mailbox))...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(owner) == 0 {
+		return nil, nil
+	}
+	return owner, nil
+}
+
 func (s *BoltQueueStore) Close() error {
 	return s.db.Close()
 }
@@ -127,4 +214,21 @@ func filterExpired(queue []protocol.Envelope, now time.Time) []protocol.Envelope
 		filtered = append(filtered, envelope)
 	}
 	return filtered
+}
+
+func validateQueueLimits(queue []protocol.Envelope, next protocol.Envelope, limits QueueLimits) error {
+	if limits.MaxMessages > 0 && len(queue)+1 > limits.MaxMessages {
+		return ErrQueueFull
+	}
+	if limits.MaxBytes <= 0 {
+		return nil
+	}
+	totalBytes := envelopeSize(next)
+	for _, envelope := range queue {
+		totalBytes += envelopeSize(envelope)
+	}
+	if totalBytes > limits.MaxBytes {
+		return ErrQueueFull
+	}
+	return nil
 }

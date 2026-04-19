@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/transport"
@@ -22,8 +23,12 @@ func TestConnectReturnsUnauthorizedErrorForBadHandshake(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient("ws"+server.URL[len("http"):], "wrong-token", "alice")
-	err := client.Connect(context.Background())
+	aliceID, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	client := NewClient("ws"+server.URL[len("http"):], "wrong-token", aliceID)
+	err = client.Connect(context.Background())
 	if err == nil {
 		t.Fatal("expected unauthorized error")
 	}
@@ -39,14 +44,22 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	alice := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "alice")
+	aliceID, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new alice identity: %v", err)
+	}
+	alice := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID)
 	defer alice.Close()
 	if err := alice.Connect(ctx); err != nil {
 		t.Fatalf("connect alice: %v", err)
 	}
 	awaitAck(t, alice.Events())
 
-	bob := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "bob")
+	bobID, err := identity.New("bob")
+	if err != nil {
+		t.Fatalf("new bob identity: %v", err)
+	}
+	bob := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobID)
 	defer bob.Close()
 	if err := bob.Connect(ctx); err != nil {
 		t.Fatalf("connect bob: %v", err)

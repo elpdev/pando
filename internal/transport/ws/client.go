@@ -2,12 +2,15 @@ package ws
 
 import (
 	"context"
+	"crypto/ed25519"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/transport"
 	"github.com/gorilla/websocket"
@@ -19,6 +22,7 @@ type Client struct {
 	url     string
 	token   string
 	mailbox string
+	device  *identity.Device
 
 	mu     sync.Mutex
 	conn   *websocket.Conn
@@ -26,11 +30,20 @@ type Client struct {
 	closed bool
 }
 
-func NewClient(url, token, mailbox string) *Client {
+func NewClient(url, token string, id *identity.Identity) *Client {
+	var device *identity.Device
+	if id != nil {
+		device, _ = id.CurrentDevice()
+	}
+	mailbox := ""
+	if device != nil {
+		mailbox = device.Mailbox
+	}
 	return &Client{
 		url:     url,
 		token:   token,
 		mailbox: mailbox,
+		device:  device,
 		events:  make(chan transport.Event, 32),
 	}
 }
@@ -61,7 +74,9 @@ func (c *Client) Connect(ctx context.Context) error {
 	if err := c.write(protocol.Message{
 		Type: protocol.MessageTypeSubscribe,
 		Subscribe: &protocol.SubscribeRequest{
-			Mailbox: c.mailbox,
+			Mailbox:          c.mailbox,
+			DeviceSigningKey: c.deviceSigningKey(),
+			DeviceProof:      c.deviceProof(),
 		},
 	}); err != nil {
 		_ = conn.Close()
@@ -70,6 +85,20 @@ func (c *Client) Connect(ctx context.Context) error {
 
 	go c.readLoop()
 	return nil
+}
+
+func (c *Client) deviceSigningKey() string {
+	if c.device == nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(c.device.SigningPublic)
+}
+
+func (c *Client) deviceProof() string {
+	if c.device == nil {
+		return ""
+	}
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(c.device.SigningPrivate, protocol.SubscribeProofBytes(c.mailbox)))
 }
 
 func (c *Client) Events() <-chan transport.Event {

@@ -39,3 +39,20 @@ func TestRelayAcceptsMatchingAuthToken(t *testing.T) {
 	}
 	_ = conn.Close()
 }
+
+func TestRelayRejectsCrossOriginWebsocketHandshakeByDefault(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{}).Handler())
+	defer server.Close()
+
+	url := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
+	headers := http.Header{}
+	headers.Set("Origin", "https://evil.example")
+	_, resp, err := websocket.DefaultDialer.Dial(url, headers)
+	if err == nil {
+		t.Fatalf("expected cross-origin websocket dial to fail")
+	}
+	if resp == nil || resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("expected forbidden response, got %+v", resp)
+	}
+}

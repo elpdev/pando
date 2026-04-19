@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
@@ -26,7 +25,11 @@ type MessageRecord struct {
 }
 
 func (s *ClientStore) LoadHistory(id *identity.Identity, peerMailbox string) ([]MessageRecord, error) {
-	bytes, err := os.ReadFile(s.historyPath(peerMailbox))
+	path, err := s.historyPath(peerMailbox)
+	if err != nil {
+		return nil, err
+	}
+	bytes, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -64,7 +67,11 @@ func (s *ClientStore) AppendHistory(id *identity.Identity, record MessageRecord)
 	if err != nil {
 		return fmt.Errorf("encrypt history: %w", err)
 	}
-	return os.WriteFile(s.historyPath(record.PeerMailbox), sealed, 0o600)
+	path, err := s.historyPath(record.PeerMailbox)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, sealed, 0o600)
 }
 
 func (s *ClientStore) MarkHistoryDelivered(id *identity.Identity, peerMailbox, messageID string, deliveredAt time.Time) error {
@@ -95,12 +102,19 @@ func (s *ClientStore) MarkHistoryDelivered(id *identity.Identity, peerMailbox, m
 	if err != nil {
 		return fmt.Errorf("encrypt history: %w", err)
 	}
-	return os.WriteFile(s.historyPath(peerMailbox), sealed, 0o600)
+	path, err := s.historyPath(peerMailbox)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, sealed, 0o600)
 }
 
-func (s *ClientStore) historyPath(peerMailbox string) string {
-	sanitized := strings.ReplaceAll(peerMailbox, string(os.PathSeparator), "_")
-	return filepath.Join(s.dir, "history-"+sanitized+".enc")
+func (s *ClientStore) historyPath(peerMailbox string) (string, error) {
+	sanitized, err := sanitizeStoreMailboxComponent(peerMailbox)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(s.dir, "history-"+sanitized+".enc"), nil
 }
 
 func historyKey(id *identity.Identity) []byte {

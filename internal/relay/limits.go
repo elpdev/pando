@@ -11,8 +11,16 @@ import (
 type Options struct {
 	QueueTTL           time.Duration
 	MaxMessageBytes    int
+	MaxQueuedMessages  int
+	MaxQueuedBytes     int
 	RateLimitPerMinute int
 	AuthToken          string
+	AllowedOrigins     []string
+}
+
+type QueueLimits struct {
+	MaxMessages int
+	MaxBytes    int
 }
 
 type rateLimiter struct {
@@ -48,9 +56,13 @@ func (l *rateLimiter) Allow(mailbox string, now time.Time) bool {
 }
 
 func validateEnvelopeLimits(envelope protocol.Envelope, options Options) error {
-	payloadBytes := len(envelope.Body) + len(envelope.Ciphertext) + len(envelope.Nonce) + len(envelope.Signature)
+	payloadBytes := envelopeSize(envelope)
 	if payloadBytes > options.MaxMessageBytes {
 		return fmt.Errorf("message exceeds relay size limit of %d bytes", options.MaxMessageBytes)
 	}
 	return nil
+}
+
+func envelopeSize(envelope protocol.Envelope) int {
+	return len(envelope.Body) + len(envelope.Ciphertext) + len(envelope.Nonce) + len(envelope.Signature)
 }

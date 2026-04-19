@@ -1,12 +1,15 @@
 package relay
 
 import (
+	"crypto/ed25519"
+	"encoding/base64"
 	"log/slog"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/gorilla/websocket"
 )
@@ -16,6 +19,7 @@ func TestQueuedMessageDeliveredOnSubscribe(t *testing.T) {
 
 	publisher := dialTestConn(t, server)
 	defer publisher.Close()
+	bobIdentity := mustIdentity(t, "bob")
 
 	writeMessage(t, publisher, protocol.Message{
 		Type: protocol.MessageTypePublish,
@@ -32,7 +36,7 @@ func TestQueuedMessageDeliveredOnSubscribe(t *testing.T) {
 
 	writeMessage(t, subscriber, protocol.Message{
 		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: &protocol.SubscribeRequest{Mailbox: "bob"},
+		Subscribe: subscribeRequest(t, bobIdentity),
 	})
 
 	ack := readMessage(t, subscriber)
@@ -54,10 +58,11 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 
 	subscriber := dialTestConn(t, server)
 	defer subscriber.Close()
+	bobIdentity := mustIdentity(t, "bob")
 
 	writeMessage(t, subscriber, protocol.Message{
 		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: &protocol.SubscribeRequest{Mailbox: "bob"},
+		Subscribe: subscribeRequest(t, bobIdentity),
 	})
 	readMessage(t, subscriber)
 
@@ -89,10 +94,11 @@ func TestSubscriberPublishAckDoesNotBlockIncomingDelivery(t *testing.T) {
 	subscriber := dialTestConn(t, server)
 	defer subscriber.Close()
 	_ = subscriber.SetReadDeadline(time.Now().Add(10 * time.Second))
+	bobIdentity := mustIdentity(t, "bob")
 
 	writeMessage(t, subscriber, protocol.Message{
 		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: &protocol.SubscribeRequest{Mailbox: "bob"},
+		Subscribe: subscribeRequest(t, bobIdentity),
 	})
 	readMessage(t, subscriber)
 
@@ -147,6 +153,35 @@ func TestSubscriberPublishAckDoesNotBlockIncomingDelivery(t *testing.T) {
 	}
 }
 
+func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+	malloryIdentity := mustIdentity(t, "mallory")
+
+	first := dialTestConn(t, server)
+	defer first.Close()
+	writeMessage(t, first, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity)})
+	msg := readMessage(t, first)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected first subscribe ack, got %q", msg.Type)
+	}
+
+	second := dialTestConn(t, server)
+	defer second.Close()
+	writeMessage(t, second, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: &protocol.SubscribeRequest{
+		Mailbox:          "bob",
+		DeviceSigningKey: base64.StdEncoding.EncodeToString(malloryIdentity.Devices[0].SigningPublic),
+		DeviceProof:      base64.StdEncoding.EncodeToString(ed25519.Sign(malloryIdentity.Devices[0].SigningPrivate, protocol.SubscribeProofBytes("bob"))),
+	}})
+	msg = readMessage(t, second)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected subscribe rejection, got %+v", msg)
+	}
+	if msg.Error.Message != genericClientError {
+		t.Fatalf("expected generic error, got %q", msg.Error.Message)
+	}
+}
+
 type unexpectedMessageTypeError struct {
 	got  string
 	want string
@@ -188,6 +223,28 @@ func readMessage(t *testing.T, conn *websocket.Conn) protocol.Message {
 		t.Fatalf("read websocket message: %v", err)
 	}
 	return msg
+}
+
+func mustIdentity(t *testing.T, mailbox string) *identity.Identity {
+	t.Helper()
+	id, err := identity.New(mailbox)
+	if err != nil {
+		t.Fatalf("new identity %s: %v", mailbox, err)
+	}
+	return id
+}
+
+func subscribeRequest(t *testing.T, id *identity.Identity) *protocol.SubscribeRequest {
+	t.Helper()
+	device, err := id.CurrentDevice()
+	if err != nil {
+		t.Fatalf("current device: %v", err)
+	}
+	return &protocol.SubscribeRequest{
+		Mailbox:          device.Mailbox,
+		DeviceSigningKey: base64.StdEncoding.EncodeToString(device.SigningPublic),
+		DeviceProof:      base64.StdEncoding.EncodeToString(ed25519.Sign(device.SigningPrivate, protocol.SubscribeProofBytes(device.Mailbox))),
+	}
 }
 
 type testWriter struct {

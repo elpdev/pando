@@ -18,7 +18,12 @@ import (
 )
 
 const BodyEncodingContactUpdate = "contact-update-v1"
-const BodyEncodingDeliveryAck = "delivery-ack-v1"
+
+const (
+	incomingAttachmentTTL             = 15 * time.Minute
+	maxPendingIncomingAttachments     = 128
+	maxPendingIncomingAttachmentsPeer = 16
+)
 
 type deliveryAck struct {
 	MessageID   string    `json:"message_id"`
@@ -214,17 +219,6 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		}
 		return &IncomingResult{Control: true, PeerAccountID: updated.AccountID, ContactUpdated: updated}, nil
 	}
-	if envelope.BodyEncoding == BodyEncodingDeliveryAck {
-		ack, err := s.parseDeliveryAck(envelope)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.MarkDelivered(contact.AccountID, ack.MessageID, ack.DeliveredAt); err != nil {
-			return nil, err
-		}
-		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, nil
-	}
-
 	body, err := session.Decrypt(s.identity, contact, envelope)
 	if err != nil {
 		return nil, err
@@ -243,6 +237,16 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		}
 		return &IncomingResult{PeerAccountID: contact.AccountID, Body: message}, nil
 	}
+	if ok && payload.Kind == contentKindDeliveryAck {
+		ack, err := s.parseDeliveryAckPayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		if err := s.MarkDelivered(contact.AccountID, ack.MessageID, ack.DeliveredAt); err != nil {
+			return nil, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, nil
+	}
 	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
 	if err != nil {
 		return nil, err
@@ -254,22 +258,33 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 	if s.incomingAttachments == nil {
 		s.incomingAttachments = make(map[string]*incomingAttachment)
 	}
+	now := time.Now().UTC()
+	s.cleanupIncomingAttachments(now)
 	if chunk == nil {
 		return "", false, fmt.Errorf("attachment payload is required")
 	}
 	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice {
 		return "", false, fmt.Errorf("invalid attachment payload type")
 	}
-	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.ChunkCount <= 0 || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
+	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.TotalSize <= 0 || chunk.TotalSize > maxAttachmentSizeBytes || chunk.ChunkCount <= 0 || chunk.ChunkCount > maxAttachmentChunkCount || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
 		return "", false, fmt.Errorf("invalid attachment payload metadata")
 	}
 	bytes, err := base64.StdEncoding.DecodeString(chunk.Data)
 	if err != nil {
 		return "", false, fmt.Errorf("decode attachment chunk: %w", err)
 	}
+	if len(bytes) == 0 || len(bytes) > attachmentChunkSizeBytes {
+		return "", false, fmt.Errorf("invalid attachment chunk size")
+	}
 	key := peerAccountID + ":" + chunk.AttachmentID
 	pending, ok := s.incomingAttachments[key]
 	if !ok {
+		if len(s.incomingAttachments) >= maxPendingIncomingAttachments {
+			return "", false, fmt.Errorf("too many pending attachments")
+		}
+		if s.pendingAttachmentCount(peerAccountID) >= maxPendingIncomingAttachmentsPeer {
+			return "", false, fmt.Errorf("too many pending attachments for peer %s", peerAccountID)
+		}
 		pending = &incomingAttachment{
 			attachmentType: chunk.AttachmentType,
 			filename:       sanitizeAttachmentName(chunk.Filename),
@@ -277,12 +292,15 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 			totalSize:      chunk.TotalSize,
 			chunkCount:     chunk.ChunkCount,
 			chunks:         make([][]byte, chunk.ChunkCount),
+			updatedAt:      now,
 		}
 		s.incomingAttachments[key] = pending
 	}
-	if pending.attachmentType != chunk.AttachmentType || pending.chunkCount != chunk.ChunkCount || pending.filename != sanitizeAttachmentName(chunk.Filename) {
+	if pending.attachmentType != chunk.AttachmentType || pending.chunkCount != chunk.ChunkCount || pending.totalSize != chunk.TotalSize || pending.filename != sanitizeAttachmentName(chunk.Filename) {
+		delete(s.incomingAttachments, key)
 		return "", false, fmt.Errorf("attachment payload does not match existing transfer")
 	}
+	pending.updatedAt = now
 	if pending.chunks[chunk.ChunkIndex] == nil {
 		pending.chunks[chunk.ChunkIndex] = bytes
 		pending.received++
@@ -306,6 +324,25 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 	}
 	delete(s.incomingAttachments, key)
 	return fmt.Sprintf("%s received: %s saved to %s", attachmentLabel(pending.attachmentType), pending.filename, path), true, nil
+}
+
+func (s *Service) cleanupIncomingAttachments(now time.Time) {
+	for key, pending := range s.incomingAttachments {
+		if pending == nil || now.Sub(pending.updatedAt) > incomingAttachmentTTL {
+			delete(s.incomingAttachments, key)
+		}
+	}
+}
+
+func (s *Service) pendingAttachmentCount(peerAccountID string) int {
+	count := 0
+	prefix := peerAccountID + ":"
+	for key := range s.incomingAttachments {
+		if strings.HasPrefix(key, prefix) {
+			count++
+		}
+	}
+	return count
 }
 
 func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {
@@ -381,22 +418,22 @@ func (s *Service) deliveryAckEnvelopes(envelope protocol.Envelope) ([]protocol.E
 	if envelope.ClientMessageID == "" {
 		return nil, nil
 	}
-	currentDevice, err := s.identity.CurrentDevice()
+	contact, err := s.store.LoadContactByDeviceMailbox(envelope.SenderMailbox)
 	if err != nil {
 		return nil, err
 	}
-	ackBody, err := json.Marshal(deliveryAck{MessageID: envelope.ClientMessageID, DeliveredAt: time.Now().UTC()})
+	ackBody, err := json.Marshal(contentPayload{Kind: contentKindDeliveryAck, DeliveryAck: &deliveryAck{MessageID: envelope.ClientMessageID, DeliveredAt: time.Now().UTC()}})
 	if err != nil {
 		return nil, fmt.Errorf("encode delivery ack: %w", err)
 	}
-	return []protocol.Envelope{{SenderMailbox: currentDevice.Mailbox, RecipientMailbox: envelope.SenderMailbox, BodyEncoding: BodyEncodingDeliveryAck, Body: string(ackBody)}}, nil
+	return session.Encrypt(s.identity, contact, string(ackBody))
 }
 
-func (s *Service) parseDeliveryAck(envelope protocol.Envelope) (*deliveryAck, error) {
-	var ack deliveryAck
-	if err := json.Unmarshal([]byte(envelope.Body), &ack); err != nil {
-		return nil, fmt.Errorf("decode delivery ack: %w", err)
+func (s *Service) parseDeliveryAckPayload(payload *contentPayload) (*deliveryAck, error) {
+	if payload == nil || payload.DeliveryAck == nil {
+		return nil, fmt.Errorf("delivery ack payload is required")
 	}
+	ack := *payload.DeliveryAck
 	if ack.MessageID == "" {
 		return nil, fmt.Errorf("delivery ack message id is required")
 	}
