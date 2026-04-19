@@ -1162,10 +1162,16 @@ func (m *Model) renderFilePicker(width int) string {
 	dirLine := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(m.filePickerDir)
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("enter open/select  |  backspace up  |  esc cancel")
 	lines := []string{title, dirLine, hint, ""}
+	visibleEntries, hiddenAbove, hiddenBelow := m.filePickerVisibleEntries(max(1, m.height-12))
 	if len(m.filePickerEntries) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("This directory is empty."))
 	} else {
-		for idx, entry := range m.filePickerEntries {
+		if hiddenAbove {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("..."))
+		}
+		for _, visible := range visibleEntries {
+			idx := visible.index
+			entry := visible.entry
 			label := entry.Name
 			if entry.IsDir {
 				label += string(filepath.Separator)
@@ -1179,11 +1185,46 @@ func (m *Model) renderFilePicker(width int) string {
 			}
 			lines = append(lines, style.Render(label))
 		}
+		if hiddenBelow {
+			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("..."))
+		}
 	}
 	modalWidth := min(max(48, width-6), width)
 	modalHeight := max(8, m.height-4)
 	modal := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+}
+
+type filePickerVisibleEntry struct {
+	index int
+	entry filePickerEntry
+}
+
+func (m *Model) filePickerVisibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
+	if len(m.filePickerEntries) == 0 {
+		return nil, false, false
+	}
+	if maxEntries <= 0 || len(m.filePickerEntries) <= maxEntries {
+		visible := make([]filePickerVisibleEntry, 0, len(m.filePickerEntries))
+		for idx, entry := range m.filePickerEntries {
+			visible = append(visible, filePickerVisibleEntry{index: idx, entry: entry})
+		}
+		return visible, false, false
+	}
+	start := m.filePickerSelected - (maxEntries / 2)
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxEntries
+	if end > len(m.filePickerEntries) {
+		end = len(m.filePickerEntries)
+		start = end - maxEntries
+	}
+	visible := make([]filePickerVisibleEntry, 0, end-start)
+	for idx := start; idx < end; idx++ {
+		visible = append(visible, filePickerVisibleEntry{index: idx, entry: m.filePickerEntries[idx]})
+	}
+	return visible, start > 0, end < len(m.filePickerEntries)
 }
 
 func attachmentLabel(attachmentType string) string {
