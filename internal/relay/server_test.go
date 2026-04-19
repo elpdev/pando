@@ -177,7 +177,7 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
 		t.Fatalf("expected subscribe rejection, got %+v", msg)
 	}
-	if msg.Error.Message != mailboxNotAuthorizedError {
+	if msg.Error.Message != ErrMailboxNotAuthorized.Error() {
 		t.Fatalf("expected mailbox authorization error, got %q", msg.Error.Message)
 	}
 	challengeMsg := readMessage(t, second)
@@ -259,7 +259,7 @@ func TestSubscribeRejectsMailboxWithoutPublishedDirectoryEntry(t *testing.T) {
 	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
 		t.Fatalf("expected unpublished mailbox rejection, got %+v", msg)
 	}
-	if msg.Error.Message != mailboxNotPublishedError {
+	if msg.Error.Message != ErrMailboxNotPublished.Error() {
 		t.Fatalf("expected unpublished mailbox error, got %q", msg.Error.Message)
 	}
 }
@@ -291,7 +291,7 @@ func TestSubscribeRejectsRevokedDeviceMailbox(t *testing.T) {
 	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
 		t.Fatalf("expected revoked device rejection, got %+v", msg)
 	}
-	if msg.Error.Message != mailboxNotPublishedError {
+	if msg.Error.Message != ErrMailboxNotPublished.Error() {
 		t.Fatalf("expected revoked mailbox to look unpublished, got %q", msg.Error.Message)
 	}
 }
