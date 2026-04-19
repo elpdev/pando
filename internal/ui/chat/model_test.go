@@ -275,6 +275,62 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 	}
 }
 
+func TestSendPhotoCommandAcceptsQuotedPath(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	photoPath := filepath.Join(t.TempDir(), "photo with spaces.png")
+	if err := os.WriteFile(photoPath, mustPhotoBytes(t), 0o600); err != nil {
+		t.Fatalf("write photo: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.input.SetValue(`/send-photo "` + photoPath + `"`)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected photo send to produce envelopes")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
+	}
+}
+
 func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")
@@ -338,6 +394,62 @@ func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected sent voice message in history: %+v", model.messages)
+	}
+}
+
+func TestSendVoiceCommandAcceptsEscapedSpacesInPath(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	voicePath := filepath.Join(t.TempDir(), "voice memo.wav")
+	if err := os.WriteFile(voicePath, mustVoiceBytes(), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.input.SetValue("/send-voice " + strings.ReplaceAll(voicePath, " ", `\ `))
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected voice send to produce envelopes")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
 	}
 }
 
