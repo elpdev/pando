@@ -32,12 +32,23 @@ type IncomingResult struct {
 
 	// ContactUpdated is set only for contact-update control messages.
 	ContactUpdated *identity.Contact
+	ContactChange  ContactUpdateChange
 	ContactRequest *store.ContactRequest
 
 	// TypingState and TypingExpiresAt are set only for typing control messages.
 	TypingState     string
 	TypingExpiresAt time.Time
 }
+
+type ContactUpdateChange string
+
+const (
+	ContactUpdateUnchanged     ContactUpdateChange = ""
+	ContactUpdateDeviceAdded   ContactUpdateChange = "device-added"
+	ContactUpdateDeviceRevoked ContactUpdateChange = "device-revoked"
+	ContactUpdateDeviceRotated ContactUpdateChange = "device-rotated"
+	ContactUpdateDeviceChanged ContactUpdateChange = "device-changed"
+)
 
 type OutgoingBatch struct {
 	MessageID string

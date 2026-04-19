@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -94,11 +95,11 @@ func (s *Service) handleContactResponse(contact *identity.Contact, payload *cont
 }
 
 func (s *Service) handleContactUpdate(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
-	updated, err := s.parseAndApplyContactUpdate(contact, payload)
+	updated, change, err := s.parseAndApplyContactUpdate(contact, payload)
 	if err != nil {
 		return nil, err
 	}
-	return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, ContactUpdated: updated}, nil
+	return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, ContactUpdated: updated, ContactChange: change}, nil
 }
 
 func (s *Service) handleDeliveryAck(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
@@ -135,28 +136,99 @@ func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *att
 	return s.incomingAttachments.handleChunk(peerAccountID, chunk)
 }
 
-func (s *Service) parseAndApplyContactUpdate(existing *identity.Contact, payload *contentPayload) (*identity.Contact, error) {
+func (s *Service) parseAndApplyContactUpdate(existing *identity.Contact, payload *contentPayload) (*identity.Contact, ContactUpdateChange, error) {
 	if payload == nil || payload.ContactUpdate == nil {
-		return nil, fmt.Errorf("contact update payload is required")
+		return nil, ContactUpdateUnchanged, fmt.Errorf("contact update payload is required")
 	}
 	return s.applyContactUpdate(existing, *payload.ContactUpdate)
 }
 
-func (s *Service) applyContactUpdate(existing *identity.Contact, bundle identity.InviteBundle) (*identity.Contact, error) {
+func (s *Service) applyContactUpdate(existing *identity.Contact, bundle identity.InviteBundle) (*identity.Contact, ContactUpdateChange, error) {
 	updated, err := identity.ContactFromInvite(bundle)
 	if err != nil {
-		return nil, err
+		return nil, ContactUpdateUnchanged, err
 	}
 	if existing.Fingerprint() != updated.Fingerprint() || existing.AccountID != updated.AccountID {
-		return nil, fmt.Errorf("contact update does not match stored identity for account %s", existing.AccountID)
+		return nil, ContactUpdateUnchanged, fmt.Errorf("contact update does not match stored identity for account %s", existing.AccountID)
 	}
+	change := detectContactUpdateChange(existing, updated)
 	updated.Verified = existing.Verified
 	updated.TrustSource = existing.TrustSource
 	updated.NormalizeTrust()
 	if err := s.store.SaveContact(updated); err != nil {
-		return nil, err
+		return nil, ContactUpdateUnchanged, err
 	}
-	return updated, nil
+	return updated, change, nil
+}
+
+func detectContactUpdateChange(existing, updated *identity.Contact) ContactUpdateChange {
+	if existing == nil || updated == nil {
+		return ContactUpdateUnchanged
+	}
+	existingDevices := activeContactDevicesByKey(existing)
+	updatedDevices := activeContactDevicesByKey(updated)
+
+	added := false
+	revoked := false
+	rotated := false
+
+	for key, next := range updatedDevices {
+		current, ok := existingDevices[key]
+		if !ok {
+			added = true
+			continue
+		}
+		if next.Mailbox != current.Mailbox || !bytes.Equal(next.SigningPublic, current.SigningPublic) || !bytes.Equal(next.EncryptionPublic, current.EncryptionPublic) {
+			rotated = true
+		}
+	}
+	for key := range existingDevices {
+		if _, ok := updatedDevices[key]; !ok {
+			revoked = true
+		}
+	}
+
+	changes := 0
+	if added {
+		changes++
+	}
+	if revoked {
+		changes++
+	}
+	if rotated {
+		changes++
+	}
+	if changes == 0 {
+		return ContactUpdateUnchanged
+	}
+	if changes > 1 {
+		return ContactUpdateDeviceChanged
+	}
+	if added {
+		return ContactUpdateDeviceAdded
+	}
+	if revoked {
+		return ContactUpdateDeviceRevoked
+	}
+	return ContactUpdateDeviceRotated
+}
+
+func activeContactDevicesByKey(contact *identity.Contact) map[string]identity.ContactDevice {
+	devices := make(map[string]identity.ContactDevice)
+	if contact == nil {
+		return devices
+	}
+	for _, device := range contact.ActiveDevices() {
+		devices[contactDeviceKey(device)] = device
+	}
+	return devices
+}
+
+func contactDeviceKey(device identity.ContactDevice) string {
+	if device.ID != "" {
+		return device.ID
+	}
+	return device.Mailbox
 }
 
 func (s *Service) parseDeliveryAckPayload(payload *contentPayload) (*deliveryAck, error) {

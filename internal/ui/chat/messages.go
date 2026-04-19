@@ -37,7 +37,9 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			m.upsertContact(result.ContactUpdated)
 			if result.ContactUpdated.AccountID == m.peer.mailbox {
 				m.syncRecipientDetails()
-				m.pushToast(fmt.Sprintf("updated device bundle for %s", result.ContactUpdated.AccountID), ToastInfo)
+				if text := contactUpdateToast(result); text != "" {
+					m.pushToast(text, ToastInfo)
+				}
 			}
 			return
 		}
@@ -48,6 +50,24 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		m.handleIncomingChat(result, *msg.Incoming)
 	case protocol.MessageTypeError:
 		m.handleIncomingError(msg.Error)
+	}
+}
+
+func contactUpdateToast(result *messaging.IncomingResult) string {
+	if result == nil || result.ContactUpdated == nil {
+		return ""
+	}
+	switch result.ContactChange {
+	case messaging.ContactUpdateDeviceAdded:
+		return fmt.Sprintf("new device added for %s", result.ContactUpdated.AccountID)
+	case messaging.ContactUpdateDeviceRevoked:
+		return fmt.Sprintf("device revoked for %s", result.ContactUpdated.AccountID)
+	case messaging.ContactUpdateDeviceRotated:
+		return fmt.Sprintf("device keys rotated for %s", result.ContactUpdated.AccountID)
+	case messaging.ContactUpdateDeviceChanged:
+		return fmt.Sprintf("device list changed for %s", result.ContactUpdated.AccountID)
+	default:
+		return ""
 	}
 }
 

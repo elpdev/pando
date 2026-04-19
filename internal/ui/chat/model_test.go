@@ -104,6 +104,57 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	}
 }
 
+func TestUnchangedContactUpdateForActivePeerDoesNotToast(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        bobService,
+		Mailbox:          "bob",
+		RecipientMailbox: "alice",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+
+	batch, err := aliceService.EncryptOutgoing("bob", "hello bob")
+	if err != nil {
+		t.Fatalf("encrypt outgoing: %v", err)
+	}
+	if batch == nil || len(batch.Envelopes) == 0 {
+		t.Fatal("expected outgoing envelopes")
+	}
+
+	model.handleProtocolMessage(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &batch.Envelopes[0]})
+	if toast, _ := model.Toast(); toast != "" {
+		t.Fatalf("expected no toast for unchanged contact update, got %q", toast)
+	}
+	if model.peer.mailbox != "alice" {
+		t.Fatalf("expected active peer to remain alice, got %q", model.peer.mailbox)
+	}
+}
+
 func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")
@@ -457,6 +508,69 @@ func TestSuccessfulConnectMarksModelConnectedWithoutAckEvent(t *testing.T) {
 	}
 	if model.input.Placeholder != "Select a contact to start chatting" {
 		t.Fatalf("unexpected placeholder: %q", model.input.Placeholder)
+	}
+}
+
+func TestBootstrapConnectFailureStopsReconnectLoop(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+
+	err = fmt.Errorf("publish your signed relay directory entry before connecting: run `pando contact publish-directory --mailbox alice`")
+	updated, cmd := model.Update(connectResultMsg{err: err})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd != nil {
+		t.Fatal("expected no reconnect command for bootstrap failure")
+	}
+	if model.conn.connecting {
+		t.Fatal("expected connecting state to clear")
+	}
+	if model.conn.connected {
+		t.Fatal("expected model to remain disconnected")
+	}
+	if !model.conn.disconnected {
+		t.Fatal("expected disconnected state")
+	}
+	if model.conn.status != err.Error() {
+		t.Fatalf("unexpected status: %q", model.conn.status)
+	}
+	if model.conn.reconnectDelay != 0 {
+		t.Fatalf("expected reconnect delay reset, got %s", model.conn.reconnectDelay)
+	}
+}
+
+func TestUnauthorizedDeviceConnectFailureStopsReconnectLoop(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+
+	err = fmt.Errorf("device is not authorized for this mailbox")
+	_, cmd := model.Update(reconnectResultMsg{err: err})
+	if cmd != nil {
+		t.Fatal("expected no reconnect command for unauthorized device")
+	}
+	if model.conn.status != err.Error() {
+		t.Fatalf("unexpected status: %q", model.conn.status)
 	}
 }
 

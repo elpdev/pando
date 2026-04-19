@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -80,9 +81,29 @@ func (m *Model) handleConnectionError(err error) tea.Cmd {
 		m.handleAuthFailure(err)
 		return nil
 	}
+	if isPermanentConnectError(err) {
+		m.conn.connecting = false
+		m.conn.connected = false
+		m.conn.disconnected = true
+		m.conn.authFailed = false
+		m.conn.reconnectDelay = 0
+		m.conn.status = err.Error()
+		m.clearPeerTyping()
+		m.resetLocalTypingState()
+		m.syncInputPlaceholder()
+		return nil
+	}
 	m.conn.status = fmt.Sprintf("disconnected: %v", err)
 	m.conn.disconnected = true
 	m.conn.connected = false
 	m.resetLocalTypingState()
 	return m.reconnectCmd()
+}
+
+func isPermanentConnectError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := err.Error()
+	return strings.Contains(message, "publish your signed relay directory entry before connecting") || strings.Contains(message, "device is not authorized for this mailbox")
 }

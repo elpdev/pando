@@ -2,6 +2,7 @@ package messaging
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"fmt"
 	"log/slog"
@@ -75,8 +76,48 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if result == nil || result.ContactUpdated == nil {
 		t.Fatalf("expected contact update result")
 	}
+	if result.ContactChange != ContactUpdateUnchanged {
+		t.Fatalf("expected unchanged contact update, got %q", result.ContactChange)
+	}
 	if len(result.ContactUpdated.ActiveDevices()) != 1 {
 		t.Fatalf("expected alice to still have one active device, got %d", len(result.ContactUpdated.ActiveDevices()))
+	}
+}
+
+func TestDetectContactUpdateChangeClassifiesAddedDevice(t *testing.T) {
+	existing := mustContactFromIdentity(t, mustIdentity(t, "alice"))
+	updated := cloneContact(existing)
+	updated.Devices = append(updated.Devices, identity.ContactDevice{
+		ID:               "alice-phone",
+		Mailbox:          "alice-phone",
+		SigningPublic:    ed25519.PublicKey("signing-added"),
+		EncryptionPublic: []byte("encrypt-added"),
+	})
+
+	if got := detectContactUpdateChange(existing, updated); got != ContactUpdateDeviceAdded {
+		t.Fatalf("expected device-added change, got %q", got)
+	}
+}
+
+func TestDetectContactUpdateChangeClassifiesRevokedDevice(t *testing.T) {
+	existing := mustContactFromIdentity(t, mustIdentity(t, "alice"))
+	updated := cloneContact(existing)
+	updated.Devices[0].Revoked = true
+	updated.Devices[0].RevokedAt = time.Now().UTC()
+
+	if got := detectContactUpdateChange(existing, updated); got != ContactUpdateDeviceRevoked {
+		t.Fatalf("expected device-revoked change, got %q", got)
+	}
+}
+
+func TestDetectContactUpdateChangeClassifiesRotatedDeviceKeys(t *testing.T) {
+	existing := mustContactFromIdentity(t, mustIdentity(t, "alice"))
+	updated := cloneContact(existing)
+	updated.Devices[0].SigningPublic = ed25519.PublicKey("signing-rotated")
+	updated.Devices[0].EncryptionPublic = []byte("encrypt-rotated")
+
+	if got := detectContactUpdateChange(existing, updated); got != ContactUpdateDeviceRotated {
+		t.Fatalf("expected device-rotated change, got %q", got)
 	}
 }
 
@@ -997,6 +1038,48 @@ func TestHandleIncomingContactRequestResponseRejectsWithoutImportingContact(t *t
 	if _, err := aliceStore.LoadContact("bob"); err != store.ErrNotFound {
 		t.Fatalf("expected no contact import after rejection, got %v", err)
 	}
+}
+
+func mustIdentity(t *testing.T, mailbox string) *identity.Identity {
+	t.Helper()
+	id, err := identity.New(mailbox)
+	if err != nil {
+		t.Fatalf("new identity %s: %v", mailbox, err)
+	}
+	return id
+}
+
+func mustContactFromIdentity(t *testing.T, id *identity.Identity) *identity.Contact {
+	t.Helper()
+	contact, err := identity.ContactFromInvite(id.InviteBundle())
+	if err != nil {
+		t.Fatalf("contact from invite: %v", err)
+	}
+	return contact
+}
+
+func cloneContact(contact *identity.Contact) *identity.Contact {
+	if contact == nil {
+		return nil
+	}
+	clone := &identity.Contact{
+		AccountID:            contact.AccountID,
+		AccountSigningPublic: append(ed25519.PublicKey(nil), contact.AccountSigningPublic...),
+		Devices:              make([]identity.ContactDevice, 0, len(contact.Devices)),
+		Verified:             contact.Verified,
+		TrustSource:          contact.TrustSource,
+	}
+	for _, device := range contact.Devices {
+		clone.Devices = append(clone.Devices, identity.ContactDevice{
+			ID:               device.ID,
+			Mailbox:          device.Mailbox,
+			SigningPublic:    append(ed25519.PublicKey(nil), device.SigningPublic...),
+			EncryptionPublic: append([]byte(nil), device.EncryptionPublic...),
+			Revoked:          device.Revoked,
+			RevokedAt:        device.RevokedAt,
+		})
+	}
+	return clone
 }
 
 func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
