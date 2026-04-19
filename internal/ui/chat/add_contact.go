@@ -151,13 +151,6 @@ func (m *Model) finishAddContact(contact *identity.Contact, toastText string) {
 	m.pushToast(toastText, ToastInfo)
 }
 
-func (m *Model) updateAddContact(msg tea.Msg) (bool, tea.Cmd) {
-	if !m.addContact.open {
-		return false, nil
-	}
-	return m.addContact.Update(msg)
-}
-
 func (m *Model) handleAddContactCompletedMsg(msg addContactCompletedMsg) (*Model, tea.Cmd) {
 	m.finishAddContact(msg.contact, msg.toastText)
 	return m, nil
@@ -278,7 +271,7 @@ func (m *addContactModal) relayConfigured() bool {
 }
 
 func (m *Model) relayConfigured() bool {
-	return strings.TrimSpace(m.relayURL) != ""
+	return strings.TrimSpace(m.relay.url) != ""
 }
 
 func completeAddContactCmd(contact *identity.Contact, toastText string) tea.Cmd {

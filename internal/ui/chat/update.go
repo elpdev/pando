@@ -12,12 +12,6 @@ import (
 )
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
-	if m.helpOpen {
-		return m.handleHelpKey(msg)
-	}
-	if m.filePicker.open {
-		return m, m.updateFilePicker(msg)
-	}
 	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
 		m.helpOpen = true
 		return m, nil
@@ -30,19 +24,12 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 		m.jumpToLatest()
 		return m, nil
 	}
-	if m.peerDetailOpen {
-		if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlP {
-			m.peerDetailOpen = false
-			return m, nil
-		}
-		return m, nil
-	}
 	if msg.Type == tea.KeyCtrlN {
 		m.openAddContactModal()
 		return m, nil
 	}
 	if msg.Type == tea.KeyCtrlP {
-		if m.recipientMailbox != "" {
+		if m.peer.mailbox != "" {
 			m.peerDetailOpen = true
 		}
 		return m, nil
@@ -63,17 +50,26 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	}
 }
 
+func (m *Model) guardCanSend() error {
+	switch {
+	case m.conn.authFailed:
+		return fmt.Errorf("cannot send: relay auth failed; restart with --relay-token")
+	case m.peer.mailbox == "":
+		return fmt.Errorf("select a contact from the sidebar first")
+	case !m.conn.connected:
+		return fmt.Errorf("relay is not connected; waiting to reconnect")
+	default:
+		return nil
+	}
+}
+
 func (m *Model) handleAttachKey() tea.Cmd {
-	if m.authFailed {
-		m.pushToast("cannot attach: relay auth failed; restart with --relay-token", ToastBad)
-		return nil
-	}
-	if m.recipientMailbox == "" {
-		m.pushToast("select a contact from the sidebar first", ToastWarn)
-		return nil
-	}
-	if !m.connected {
-		m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
+	if err := m.guardCanSend(); err != nil {
+		level := ToastWarn
+		if m.conn.authFailed {
+			level = ToastBad
+		}
+		m.pushToast(err.Error(), level)
 		return nil
 	}
 	if err := m.openFilePicker(); err != nil {
@@ -85,22 +81,18 @@ func (m *Model) handleAttachKey() tea.Cmd {
 func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	body := strings.TrimSpace(m.input.Value())
 	if body == "" {
-		previousRecipient := m.recipientMailbox
+		previousRecipient := m.peer.mailbox
 		if !m.activateSelectedContact() {
 			return m, nil
 		}
 		return m, m.stopTypingCmd(previousRecipient)
 	}
-	if m.authFailed {
-		m.pushToast("cannot send: relay auth failed; restart with --relay-token", ToastBad)
-		return m, nil
-	}
-	if m.recipientMailbox == "" {
-		m.pushToast("select a contact from the sidebar first", ToastWarn)
-		return m, nil
-	}
-	if !m.connected {
-		m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
+	if err := m.guardCanSend(); err != nil {
+		level := ToastWarn
+		if m.conn.authFailed {
+			level = ToastBad
+		}
+		m.pushToast(err.Error(), level)
 		return m, nil
 	}
 	if strings.HasPrefix(body, "/send-photo") {
@@ -112,7 +104,7 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	if strings.HasPrefix(body, "/send-file") {
 		return m.handleAttachmentCommand("/send-file", body, m.messaging.PrepareFileOutgoing)
 	}
-	batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
+	batch, err := m.messaging.EncryptOutgoing(m.peer.mailbox, body)
 	if err != nil {
 		m.pushToast(err.Error(), ToastBad)
 		return m, nil
@@ -128,7 +120,7 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
-	return m, m.sendCmd(m.recipientMailbox, body, batch)
+	return m, m.sendCmd(m.peer.mailbox, body, batch)
 }
 
 func (m *Model) handleClientEventMsg(msg clientEventMsg) (*Model, tea.Cmd) {
@@ -155,8 +147,8 @@ func (m *Model) handleTypingTickMsg(msg typingTickMsg) (*Model, tea.Cmd) {
 	if m.typing.peerVisible && !m.typing.peerExpiresAt.IsZero() && !now.Before(m.typing.peerExpiresAt) {
 		m.clearPeerTyping()
 	}
-	if m.toast != nil && !now.Before(m.toast.expiresAt) {
-		m.toast = nil
+	if m.ui.toast != nil && !now.Before(m.ui.toast.expiresAt) {
+		m.ui.toast = nil
 	}
 	var spCmd tea.Cmd
 	if m.typing.peerVisible {
@@ -181,7 +173,7 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return m, nil
 	}
-	if msg.recipient == m.recipientMailbox {
+	if msg.recipient == m.peer.mailbox {
 		if !m.updateMessageStatus(msg.messageID, statusSent) {
 			m.loadHistory()
 		}

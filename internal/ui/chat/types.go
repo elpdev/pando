@@ -18,6 +18,8 @@ type Deps struct {
 	RelayClientFactory func(url, token string) (RelayClient, error)
 }
 
+// Dependencies.
+
 // RelayClient is the minimum relay surface the add-contact modal needs for
 // directory lookups and invite-code rendezvous. Kept as an interface so tests
 // can swap in an in-memory fake.
@@ -26,6 +28,8 @@ type RelayClient interface {
 	PutRendezvousPayload(id string, p relayapi.RendezvousPayload) error
 	GetRendezvousPayloads(id string) ([]relayapi.RendezvousPayload, error)
 }
+
+// Contact and message types.
 
 type contactItem struct {
 	Mailbox     string
@@ -57,6 +61,8 @@ const (
 	statusDelivered                       // peer acked
 	statusFailed                          // send returned an error
 )
+
+// Connection, focus, and toast enums.
 
 // focusState tracks which pane owns keyboard input. In wide mode both panes
 // are visible and focus only decorates borders + directs ↑/↓; in narrow mode
@@ -103,11 +109,16 @@ type toastState struct {
 
 const toastLifetime = 3 * time.Second
 
+// Internal tea.Msg types.
+
 type clientEventMsg transport.Event
 type connectResultMsg struct{ err error }
 type reconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
+type filePickerClosedMsg struct{}
+type filePickerErrorMsg struct{ err error }
+type filePickerSelectedMsg struct{ path string }
 
 type sendResultMsg struct {
 	recipient string

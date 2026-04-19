@@ -64,20 +64,20 @@ func (m *Model) activateSelectedContact() bool {
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.contacts) {
 		return false
 	}
-	m.recipientMailbox = m.contacts[m.selectedIndex].Mailbox
-	m.clearUnread(m.recipientMailbox)
+	m.peer.mailbox = m.contacts[m.selectedIndex].Mailbox
+	m.clearUnread(m.peer.mailbox)
 	m.syncRecipientDetails()
 	m.clearPeerTyping()
 	m.loadHistory()
 	m.syncViewportToBottom()
 	m.syncInputPlaceholder()
-	m.focus = focusChat
+	m.ui.focus = focusChat
 	m.input.Focus()
 	return true
 }
 
 func (m *Model) markUnread(peer string) {
-	if peer == "" || peer == m.recipientMailbox {
+	if peer == "" || peer == m.peer.mailbox {
 		return
 	}
 	if m.unread == nil {
@@ -101,13 +101,13 @@ func (m *Model) Unread(peer string) int {
 }
 
 func (m *Model) loadHistory() {
-	m.messageItems = nil
-	m.messages = nil
-	if m.recipientMailbox == "" {
+	m.msgs.items = nil
+	m.msgs.rendered = nil
+	if m.peer.mailbox == "" {
 		m.syncViewport()
 		return
 	}
-	records, err := m.messaging.History(m.recipientMailbox)
+	records, err := m.messaging.History(m.peer.mailbox)
 	if err != nil {
 		m.pushToast(fmt.Sprintf("load history failed: %v", err), ToastBad)
 		return
@@ -129,9 +129,9 @@ func (m *Model) loadHistory() {
 		} else {
 			item.sender = record.PeerMailbox
 		}
-		m.messageItems = append(m.messageItems, item)
+		m.msgs.items = append(m.msgs.items, item)
 	}
-	if len(m.messageItems) == 0 {
+	if len(m.msgs.items) == 0 {
 		m.viewport.SetContent(style.Muted.Render("No messages yet."))
 		return
 	}
@@ -140,22 +140,22 @@ func (m *Model) loadHistory() {
 }
 
 func (m *Model) syncRecipientDetails() {
-	m.peerFingerprint = "unknown"
-	m.peerVerified = false
-	m.peerTrustSource = identity.TrustSourceUnverified
-	if m.recipientMailbox == "" {
+	m.peer.fingerprint = "unknown"
+	m.peer.verified = false
+	m.peer.trustSource = identity.TrustSourceUnverified
+	if m.peer.mailbox == "" {
 		return
 	}
-	contact := m.findContact(m.recipientMailbox)
+	contact := m.findContact(m.peer.mailbox)
 	if contact == nil {
-		if stored, err := m.messaging.Contact(m.recipientMailbox); err == nil {
-			m.peerFingerprint = stored.Fingerprint()
-			m.peerVerified = stored.Verified
-			m.peerTrustSource = stored.TrustSource
+		if stored, err := m.messaging.Contact(m.peer.mailbox); err == nil {
+			m.peer.fingerprint = stored.Fingerprint()
+			m.peer.verified = stored.Verified
+			m.peer.trustSource = stored.TrustSource
 		}
 		return
 	}
-	m.peerFingerprint = contact.Fingerprint
-	m.peerVerified = contact.Verified
-	m.peerTrustSource = contact.TrustSource
+	m.peer.fingerprint = contact.Fingerprint
+	m.peer.verified = contact.Verified
+	m.peer.trustSource = contact.TrustSource
 }

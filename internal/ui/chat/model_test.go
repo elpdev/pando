@@ -67,8 +67,8 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if initCmd == nil {
 		t.Fatal("expected init command")
 	}
-	if len(model.messages) < 1 {
-		t.Fatalf("expected local history to be loaded, got %d messages", len(model.messages))
+	if len(model.msgs.rendered) < 1 {
+		t.Fatalf("expected local history to be loaded, got %d messages", len(model.msgs.rendered))
 	}
 
 	updated, cmd := model.Update(clientEventMsg(transport.Event{Err: fmt.Errorf("%w: check relay token", transport.ErrUnauthorized)}))
@@ -78,17 +78,17 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no reconnect command after auth failure")
 	}
-	if !model.authFailed {
+	if !model.conn.authFailed {
 		t.Fatal("expected auth failure state")
 	}
-	if model.connected {
+	if model.conn.connected {
 		t.Fatal("expected model to remain disconnected")
 	}
 	if model.input.Placeholder != "Relay auth failed. Restart with --relay-token" {
 		t.Fatalf("unexpected placeholder: %q", model.input.Placeholder)
 	}
-	if model.status != "relay auth failed: relay unauthorized: check relay token" {
-		t.Fatalf("unexpected status: %q", model.status)
+	if model.conn.status != "relay auth failed: relay unauthorized: check relay token" {
+		t.Fatalf("unexpected status: %q", model.conn.status)
 	}
 
 	model.input.SetValue("hi")
@@ -99,8 +99,8 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if model.input.Value() != "hi" {
 		t.Fatalf("expected input to remain unchanged, got %q", model.input.Value())
 	}
-	if len(model.messages) < 1 {
-		t.Fatalf("expected local history to remain visible, got %d messages", len(model.messages))
+	if len(model.msgs.rendered) < 1 {
+		t.Fatalf("expected local history to remain visible, got %d messages", len(model.msgs.rendered))
 	}
 }
 
@@ -146,8 +146,8 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 		RelayURL:  "ws://localhost:8080/ws",
 	})
 	model.SetSize(100, 20)
-	if model.recipientMailbox != "" {
-		t.Fatalf("expected no active chat, got %q", model.recipientMailbox)
+	if model.peer.mailbox != "" {
+		t.Fatalf("expected no active chat, got %q", model.peer.mailbox)
 	}
 	if model.selectedIndex != 0 {
 		t.Fatalf("expected first contact to be selected, got %d", model.selectedIndex)
@@ -167,17 +167,17 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no async command when opening selected chat")
 	}
-	if model.recipientMailbox != "bob" {
-		t.Fatalf("expected bob to become active chat, got %q", model.recipientMailbox)
+	if model.peer.mailbox != "bob" {
+		t.Fatalf("expected bob to become active chat, got %q", model.peer.mailbox)
 	}
-	if !model.peerVerified {
+	if !model.peer.verified {
 		t.Fatal("expected active peer to be verified")
 	}
-	if len(model.messageItems) != 1 || model.messageItems[0].body != "hello from bob" {
-		t.Fatalf("expected bob history to load, got %+v", model.messageItems)
+	if len(model.msgs.items) != 1 || model.msgs.items[0].body != "hello from bob" {
+		t.Fatalf("expected bob history to load, got %+v", model.msgs.items)
 	}
-	if !stringsContainsAny(model.messages, "hello from bob") {
-		t.Fatalf("expected rendered history to include body, got %+v", model.messages)
+	if !stringsContainsAny(model.msgs.rendered, "hello from bob") {
+		t.Fatalf("expected rendered history to include body, got %+v", model.msgs.rendered)
 	}
 	view = model.View()
 	if !strings.Contains(view, "bob") {
@@ -207,8 +207,8 @@ func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
 		Mailbox:   "alice",
 		RelayURL:  "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue("hi")
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -299,10 +299,10 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	if model.addContact.open {
 		t.Fatal("expected add contact modal to close after import")
 	}
-	if model.recipientMailbox != "bob" {
-		t.Fatalf("expected imported contact to become active chat, got %q", model.recipientMailbox)
+	if model.peer.mailbox != "bob" {
+		t.Fatalf("expected imported contact to become active chat, got %q", model.peer.mailbox)
 	}
-	if !model.peerVerified {
+	if !model.peer.verified {
 		t.Fatal("expected imported contact to be verified")
 	}
 	if toast, _ := model.Toast(); toast != "added verified contact bob" {
@@ -365,10 +365,10 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 		t.Fatal("expected import command")
 	}
 	drainMsg(t, model, cmd)
-	if model.recipientMailbox != "bob" {
-		t.Fatalf("expected verbose invite paste to import bob, got %q", model.recipientMailbox)
+	if model.peer.mailbox != "bob" {
+		t.Fatalf("expected verbose invite paste to import bob, got %q", model.peer.mailbox)
 	}
-	if !model.peerVerified {
+	if !model.peer.verified {
 		t.Fatal("expected verbose invite import to verify contact")
 	}
 }
@@ -446,14 +446,14 @@ func TestSuccessfulConnectMarksModelConnectedWithoutAckEvent(t *testing.T) {
 	if followup == nil {
 		t.Fatal("expected wait-for-event follow-up command")
 	}
-	if !model.connected {
+	if !model.conn.connected {
 		t.Fatal("expected model to be connected after successful connect")
 	}
-	if model.connecting {
+	if model.conn.connecting {
 		t.Fatal("expected connecting state to clear")
 	}
-	if model.status != "connected as alice" {
-		t.Fatalf("unexpected status: %q", model.status)
+	if model.conn.status != "connected as alice" {
+		t.Fatalf("unexpected status: %q", model.conn.status)
 	}
 	if model.input.Placeholder != "Select a contact to start chatting" {
 		t.Fatalf("unexpected placeholder: %q", model.input.Placeholder)
@@ -492,8 +492,8 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue("/send-photo " + photoPath)
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -515,14 +515,14 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
 	}
 	found := false
-	for _, message := range model.messages {
+	for _, message := range model.msgs.rendered {
 		if strings.Contains(message, "photo sent: photo.png") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected sent photo message in history: %+v", model.messages)
+		t.Fatalf("expected sent photo message in history: %+v", model.msgs.rendered)
 	}
 }
 
@@ -558,8 +558,8 @@ func TestSendPhotoCommandAcceptsQuotedPath(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue(`/send-photo "` + photoPath + `"`)
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -614,8 +614,8 @@ func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue("/send-voice " + voicePath)
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -637,14 +637,14 @@ func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
 	}
 	found := false
-	for _, message := range model.messages {
+	for _, message := range model.msgs.rendered {
 		if strings.Contains(message, "voice note sent: clip.wav") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected sent voice message in history: %+v", model.messages)
+		t.Fatalf("expected sent voice message in history: %+v", model.msgs.rendered)
 	}
 }
 
@@ -680,8 +680,8 @@ func TestSendVoiceCommandAcceptsEscapedSpacesInPath(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue("/send-voice " + strings.ReplaceAll(voicePath, " ", `\ `))
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -736,8 +736,8 @@ func TestSendFileCommandQueuesAttachmentBatch(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.input.SetValue("/send-file " + filePath)
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -759,14 +759,14 @@ func TestSendFileCommandQueuesAttachmentBatch(t *testing.T) {
 		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
 	}
 	found := false
-	for _, message := range model.messages {
+	for _, message := range model.msgs.rendered {
 		if strings.Contains(message, "file sent: notes.txt") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected sent file message in history: %+v", model.messages)
+		t.Fatalf("expected sent file message in history: %+v", model.msgs.rendered)
 	}
 }
 
@@ -803,8 +803,8 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.SetSize(100, 20)
 	model.filePicker.dir = pickerDir
 
@@ -844,14 +844,14 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 		t.Fatal("expected picker to close after selecting a file")
 	}
 	found := false
-	for _, message := range model.messages {
+	for _, message := range model.msgs.rendered {
 		if strings.Contains(message, "file sent: draft.txt") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Fatalf("expected picker file message in history: %+v", model.messages)
+		t.Fatalf("expected picker file message in history: %+v", model.msgs.rendered)
 	}
 }
 
@@ -875,8 +875,8 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.SetSize(100, 20)
 	model.filePicker.dir = pickerRoot
 
@@ -1037,8 +1037,8 @@ func TestHandleInputActivitySendsTypingWithoutSavingHistory(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 
 	cmd := model.handleInputActivity("", "h")
 	if cmd == nil {
@@ -1096,12 +1096,12 @@ func TestPushToastExpiresOnNextTypingTick(t *testing.T) {
 	}
 
 	// A tick that arrives before the toast expires must preserve it.
-	model.Update(typingTickMsg(model.toast.expiresAt.Add(-1 * time.Millisecond)))
+	model.Update(typingTickMsg(model.ui.toast.expiresAt.Add(-1 * time.Millisecond)))
 	if txt, _ := model.Toast(); txt != "hello" {
 		t.Fatalf("expected toast to remain before expiry, got %q", txt)
 	}
 	// A tick at or after the expiry clears it.
-	model.Update(typingTickMsg(model.toast.expiresAt.Add(1 * time.Millisecond)))
+	model.Update(typingTickMsg(model.ui.toast.expiresAt.Add(1 * time.Millisecond)))
 	if txt, _ := model.Toast(); txt != "" {
 		t.Fatalf("expected toast cleared after expiry, got %q", txt)
 	}
@@ -1127,12 +1127,12 @@ func TestConnectionStateReflectsFlags(t *testing.T) {
 	if got := model.ConnectionState(); got != ConnConnected {
 		t.Fatalf("expected ConnConnected, got %v", got)
 	}
-	model.disconnected = true
-	model.connected = false
+	model.conn.disconnected = true
+	model.conn.connected = false
 	if got := model.ConnectionState(); got != ConnDisconnected {
 		t.Fatalf("expected ConnDisconnected, got %v", got)
 	}
-	model.authFailed = true
+	model.conn.authFailed = true
 	if got := model.ConnectionState(); got != ConnAuthFailed {
 		t.Fatalf("expected ConnAuthFailed, got %v", got)
 	}
@@ -1210,10 +1210,10 @@ func TestRenderMessagesGroupsByConsecutiveSender(t *testing.T) {
 		RelayURL:         "ws://localhost:8080/ws",
 	})
 	model.SetSize(120, 20)
-	model.peerFingerprint = "abcd1234abcd1234"
+	model.peer.fingerprint = "abcd1234abcd1234"
 
 	t0 := time.Date(2026, 4, 19, 12, 34, 0, 0, time.UTC)
-	model.messageItems = []messageItem{
+	model.msgs.items = []messageItem{
 		{direction: "outbound", sender: "alice", body: "hi", timestamp: t0, messageID: "m1", status: statusDelivered},
 		{direction: "outbound", sender: "alice", body: "one more thing", timestamp: t0.Add(20 * time.Second), messageID: "m2", status: statusSent},
 		{direction: "inbound", sender: "bob", body: "got it", timestamp: t0.Add(time.Minute)},
@@ -1221,7 +1221,7 @@ func TestRenderMessagesGroupsByConsecutiveSender(t *testing.T) {
 	model.renderMessages()
 
 	// Expected shape: "you · HH:MM" header once, two body lines; then "bob · HH:MM" header, one body line.
-	joined := strings.Join(model.messages, "\n")
+	joined := strings.Join(model.msgs.rendered, "\n")
 	youHeaders := strings.Count(joined, "you")
 	bobHeaders := strings.Count(joined, "bob")
 	if youHeaders != 1 {
@@ -1253,11 +1253,11 @@ func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
 	})
 	model.SetSize(120, 20)
 
-	model.messageItems = []messageItem{
+	model.msgs.items = []messageItem{
 		{direction: "outbound", sender: "alice", body: "hi", timestamp: time.Now(), messageID: "m1", status: statusSent},
 	}
 	model.renderMessages()
-	before := strings.Join(model.messages, "\n")
+	before := strings.Join(model.msgs.rendered, "\n")
 	if !strings.Contains(before, style.GlyphDeliverySent) {
 		t.Fatalf("expected sent glyph before ack: %q", before)
 	}
@@ -1265,7 +1265,7 @@ func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
 	if ok := model.updateMessageStatus("m1", statusDelivered); !ok {
 		t.Fatal("updateMessageStatus returned false for known messageID")
 	}
-	after := strings.Join(model.messages, "\n")
+	after := strings.Join(model.msgs.rendered, "\n")
 	if !strings.Contains(after, style.GlyphDeliveryDelivered) {
 		t.Fatalf("expected delivered glyph after ack: %q", after)
 	}
@@ -1300,28 +1300,28 @@ func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 func TestTabTogglesFocus(t *testing.T) {
 	model := newHelpTestModel(t)
 
-	if model.focus != focusChat {
-		t.Fatalf("expected initial focus on chat, got %v", model.focus)
+	if model.ui.focus != focusChat {
+		t.Fatalf("expected initial focus on chat, got %v", model.ui.focus)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if model.focus != focusSidebar {
-		t.Fatalf("expected tab to move focus to sidebar, got %v", model.focus)
+	if model.ui.focus != focusSidebar {
+		t.Fatalf("expected tab to move focus to sidebar, got %v", model.ui.focus)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if model.focus != focusChat {
-		t.Fatalf("expected tab to move focus back to chat, got %v", model.focus)
+	if model.ui.focus != focusChat {
+		t.Fatalf("expected tab to move focus back to chat, got %v", model.ui.focus)
 	}
 }
 
 func TestPendingIncomingRendersJumpPillAndClearsOnEnd(t *testing.T) {
 	model := newHelpTestModel(t)
-	model.recipientMailbox = "bob"
-	model.peerFingerprint = "abcd1234abcd1234"
+	model.peer.mailbox = "bob"
+	model.peer.fingerprint = "abcd1234abcd1234"
 	model.SetSize(100, 20)
 
 	// Seed a long conversation so there is room to scroll up.
 	for i := 0; i < 40; i++ {
-		model.messageItems = append(model.messageItems, messageItem{
+		model.msgs.items = append(model.msgs.items, messageItem{
 			direction: "inbound",
 			sender:    "bob",
 			body:      fmt.Sprintf("line %d", i),
@@ -1343,16 +1343,16 @@ func TestPendingIncomingRendersJumpPillAndClearsOnEnd(t *testing.T) {
 	model.appendMessageItem(messageItem{
 		direction: "inbound", sender: "bob", body: "new 2", timestamp: time.Now(),
 	})
-	if model.pendingIncoming != 2 {
-		t.Fatalf("expected pending=2 after two inbound while scrolled up, got %d", model.pendingIncoming)
+	if model.msgs.pendingIncoming != 2 {
+		t.Fatalf("expected pending=2 after two inbound while scrolled up, got %d", model.msgs.pendingIncoming)
 	}
 	if !strings.Contains(model.View(), "2 new") {
 		t.Fatalf("expected '2 new' pill in view: %q", model.View())
 	}
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
-	if model.pendingIncoming != 0 {
-		t.Fatalf("expected end-key to clear pending, got %d", model.pendingIncoming)
+	if model.msgs.pendingIncoming != 0 {
+		t.Fatalf("expected end-key to clear pending, got %d", model.msgs.pendingIncoming)
 	}
 	if !model.viewport.AtBottom() {
 		t.Fatal("expected end-key to scroll viewport to bottom")
@@ -1435,8 +1435,8 @@ func TestFilePickerRendersSizesAndParentEntry(t *testing.T) {
 		RecipientMailbox: "bob",
 		RelayURL:         "ws://localhost:8080/ws",
 	})
-	model.connected = true
-	model.connecting = false
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.SetSize(100, 20)
 	model.filePicker.dir = dir
 

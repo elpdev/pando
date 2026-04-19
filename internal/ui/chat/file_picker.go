@@ -27,11 +27,17 @@ type filePickerVisibleEntry struct {
 	entry filePickerEntry
 }
 
-type filePickerState struct {
+type filePickerModel struct {
 	open     bool
 	dir      string
 	entries  []filePickerEntry
 	selected int
+	width    int
+	height   int
+}
+
+func newFilePickerModel() filePickerModel {
+	return filePickerModel{dir: defaultFilePickerDir()}
 }
 
 func defaultFilePickerDir() string {
@@ -44,6 +50,197 @@ func defaultFilePickerDir() string {
 	return string(filepath.Separator)
 }
 
+func (m filePickerModel) Init() tea.Cmd {
+	return nil
+}
+
+func (m *filePickerModel) SetSize(width, height int) {
+	m.width = width
+	m.height = height
+}
+
+func (m *filePickerModel) Open() error {
+	return m.openAt(m.dir)
+}
+
+func (m *filePickerModel) Close() {
+	m.open = false
+	m.entries = nil
+	m.selected = 0
+}
+
+func (m filePickerModel) Update(msg tea.Msg) (filePickerModel, tea.Cmd) {
+	if !m.open {
+		return m, nil
+	}
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch keyMsg.Type {
+	case tea.KeyEsc:
+		m.Close()
+		return m, func() tea.Msg { return filePickerClosedMsg{} }
+	case tea.KeyBackspace:
+		if err := m.goToParentDirectory(); err != nil {
+			return m, func() tea.Msg { return filePickerErrorMsg{err: err} }
+		}
+		return m, nil
+	case tea.KeyUp:
+		m.moveSelection(-1)
+		return m, nil
+	case tea.KeyDown:
+		m.moveSelection(1)
+		return m, nil
+	case tea.KeyEnter:
+		entry := m.selectedEntry()
+		if entry == nil {
+			return m, nil
+		}
+		if entry.IsDir {
+			if err := m.openAt(entry.Path); err != nil {
+				return m, func() tea.Msg { return filePickerErrorMsg{err: err} }
+			}
+			return m, nil
+		}
+		m.Close()
+		return m, func() tea.Msg { return filePickerSelectedMsg{path: entry.Path} }
+	default:
+		return m, nil
+	}
+}
+
+func (m filePickerModel) View() string {
+	title := style.Bold.Render("Attach File")
+	dirLine := style.Muted.Render(m.dir)
+	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
+	lines := []string{title, dirLine, hint, ""}
+	modalWidth := min(max(48, m.width-6), m.width)
+	rowWidth := max(1, modalWidth-6)
+	visibleEntries, hiddenAbove, hiddenBelow := m.visibleEntries(max(1, m.height-12))
+	if len(m.entries) == 0 {
+		lines = append(lines, style.Muted.Render("(empty) - backspace to go up"))
+	} else {
+		if hiddenAbove {
+			lines = append(lines, style.Muted.Render("..."))
+		}
+		for _, visible := range visibleEntries {
+			lines = append(lines, m.renderRow(visible.entry, visible.index == m.selected, rowWidth))
+		}
+		if hiddenBelow {
+			lines = append(lines, style.Muted.Render("..."))
+		}
+	}
+	modalHeight := max(8, m.height-4)
+	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(m.width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+}
+
+func (m *filePickerModel) openAt(dir string) error {
+	entries, cleanedDir, err := readFilePickerEntries(dir)
+	if err != nil {
+		return err
+	}
+	m.open = true
+	m.dir = cleanedDir
+	m.entries = entries
+	m.selected = 0
+	return nil
+}
+
+func (m *filePickerModel) goToParentDirectory() error {
+	parent := filepath.Dir(m.dir)
+	if parent == m.dir {
+		return nil
+	}
+	return m.openAt(parent)
+}
+
+func (m *filePickerModel) moveSelection(delta int) {
+	if len(m.entries) == 0 {
+		return
+	}
+	m.selected += delta
+	if m.selected < 0 {
+		m.selected = 0
+	}
+	if m.selected >= len(m.entries) {
+		m.selected = len(m.entries) - 1
+	}
+}
+
+func (m *filePickerModel) selectedEntry() *filePickerEntry {
+	if m.selected < 0 || m.selected >= len(m.entries) {
+		return nil
+	}
+	return &m.entries[m.selected]
+}
+
+func (m filePickerModel) renderRow(entry filePickerEntry, selected bool, width int) string {
+	label := entry.Name
+	if entry.IsDir {
+		label += string(filepath.Separator)
+	}
+	sizeStr := ""
+	if !entry.IsDir {
+		sizeStr = formatFileSize(entry.Size)
+	}
+	pad := width - lipgloss.Width(label) - lipgloss.Width(sizeStr)
+	if pad < 1 {
+		pad = 1
+	}
+	line := label + strings.Repeat(" ", pad) + style.Muted.Render(sizeStr)
+
+	rowStyle := lipgloss.NewStyle().Width(width)
+	if entry.IsDir {
+		rowStyle = rowStyle.Inherit(style.StatusOk)
+	}
+	if selected {
+		rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
+	}
+	return rowStyle.Render(line)
+}
+
+func (m filePickerModel) visibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
+	if len(m.entries) == 0 {
+		return nil, false, false
+	}
+	if maxEntries <= 0 || len(m.entries) <= maxEntries {
+		visible := make([]filePickerVisibleEntry, 0, len(m.entries))
+		for idx, entry := range m.entries {
+			visible = append(visible, filePickerVisibleEntry{index: idx, entry: entry})
+		}
+		return visible, false, false
+	}
+	start := m.selected - (maxEntries / 2)
+	if start < 0 {
+		start = 0
+	}
+	end := start + maxEntries
+	if end > len(m.entries) {
+		end = len(m.entries)
+		start = end - maxEntries
+	}
+	visible := make([]filePickerVisibleEntry, 0, end-start)
+	for idx := start; idx < end; idx++ {
+		visible = append(visible, filePickerVisibleEntry{index: idx, entry: m.entries[idx]})
+	}
+	return visible, start > 0, end < len(m.entries)
+}
+
+func (m *Model) openFilePicker() error {
+	if err := m.filePicker.Open(); err != nil {
+		return err
+	}
+	m.input.Blur()
+	return nil
+}
+
+func (m *Model) closeFilePicker() {
+	m.filePicker.Close()
+	m.input.Focus()
+}
+
 func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 	var (
 		batch       *messaging.OutgoingBatch
@@ -52,11 +249,11 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 	)
 	switch attachmentType {
 	case messaging.AttachmentTypePhoto:
-		batch, displayBody, err = m.messaging.PreparePhotoOutgoing(m.recipientMailbox, path)
+		batch, displayBody, err = m.messaging.PreparePhotoOutgoing(m.peer.mailbox, path)
 	case messaging.AttachmentTypeVoice:
-		batch, displayBody, err = m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
+		batch, displayBody, err = m.messaging.PrepareVoiceOutgoing(m.peer.mailbox, path)
 	case messaging.AttachmentTypeFile:
-		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.recipientMailbox, path)
+		batch, displayBody, err = m.messaging.PrepareFileOutgoing(m.peer.mailbox, path)
 	default:
 		m.pushToast(fmt.Sprintf("unsupported attachment type %q", attachmentType), ToastBad)
 		return nil
@@ -77,92 +274,15 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
-	return m.sendCmd(m.recipientMailbox, displayBody, batch)
+	return m.sendCmd(m.peer.mailbox, displayBody, batch)
 }
 
-func (m *Model) updateFilePicker(msg tea.KeyMsg) tea.Cmd {
-	switch msg.Type {
-	case tea.KeyEsc:
-		m.closeFilePicker()
-		return nil
-	case tea.KeyBackspace:
-		if err := m.goToParentDirectory(); err != nil {
-			m.pushToast(fmt.Sprintf("file picker failed: %v", err), ToastBad)
-		}
-		return nil
-	case tea.KeyUp:
-		m.moveFilePickerSelection(-1)
-		return nil
-	case tea.KeyDown:
-		m.moveFilePickerSelection(1)
-		return nil
-	case tea.KeyEnter:
-		entry := m.selectedFilePickerEntry()
-		if entry == nil {
-			return nil
-		}
-		if entry.IsDir {
-			if err := m.openFilePickerAt(entry.Path); err != nil {
-				m.pushToast(fmt.Sprintf("open directory failed: %v", err), ToastBad)
-			}
-			return nil
-		}
-		m.closeFilePicker()
-		return m.sendAttachment(entry.Path, messaging.AttachmentTypeFile)
-	}
-	return nil
-}
-
-func (m *Model) openFilePicker() error {
-	return m.openFilePickerAt(m.filePicker.dir)
-}
-
-func (m *Model) openFilePickerAt(dir string) error {
-	entries, cleanedDir, err := readFilePickerEntries(dir)
-	if err != nil {
-		return err
-	}
-	m.filePicker.open = true
-	m.filePicker.dir = cleanedDir
-	m.filePicker.entries = entries
-	m.filePicker.selected = 0
-	m.input.Blur()
-	return nil
-}
-
-func (m *Model) closeFilePicker() {
-	m.filePicker.open = false
-	m.filePicker.entries = nil
-	m.filePicker.selected = 0
-	m.input.Focus()
-}
-
-func (m *Model) goToParentDirectory() error {
-	parent := filepath.Dir(m.filePicker.dir)
-	if parent == m.filePicker.dir {
-		return nil
-	}
-	return m.openFilePickerAt(parent)
-}
-
-func (m *Model) moveFilePickerSelection(delta int) {
-	if len(m.filePicker.entries) == 0 {
-		return
-	}
-	m.filePicker.selected += delta
-	if m.filePicker.selected < 0 {
-		m.filePicker.selected = 0
-	}
-	if m.filePicker.selected >= len(m.filePicker.entries) {
-		m.filePicker.selected = len(m.filePicker.entries) - 1
-	}
+func (m *Model) filePickerVisibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
+	return m.filePicker.visibleEntries(maxEntries)
 }
 
 func (m *Model) selectedFilePickerEntry() *filePickerEntry {
-	if m.filePicker.selected < 0 || m.filePicker.selected >= len(m.filePicker.entries) {
-		return nil
-	}
-	return &m.filePicker.entries[m.filePicker.selected]
+	return m.filePicker.selectedEntry()
 }
 
 func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
@@ -220,82 +340,4 @@ func formatFileSize(bytes int64) string {
 	default:
 		return fmt.Sprintf("%.1f GB", float64(bytes)/GB)
 	}
-}
-
-func (m *Model) renderFilePicker(width int) string {
-	title := style.Bold.Render("Attach File")
-	dirLine := style.Muted.Render(m.filePicker.dir)
-	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
-	lines := []string{title, dirLine, hint, ""}
-	modalWidth := min(max(48, width-6), width)
-	rowWidth := max(1, modalWidth-6)
-	visibleEntries, hiddenAbove, hiddenBelow := m.filePickerVisibleEntries(max(1, m.height-12))
-	if len(m.filePicker.entries) == 0 {
-		lines = append(lines, style.Muted.Render("(empty) — backspace to go up"))
-	} else {
-		if hiddenAbove {
-			lines = append(lines, style.Muted.Render("..."))
-		}
-		for _, visible := range visibleEntries {
-			lines = append(lines, m.renderFilePickerRow(visible.entry, visible.index == m.filePicker.selected, rowWidth))
-		}
-		if hiddenBelow {
-			lines = append(lines, style.Muted.Render("..."))
-		}
-	}
-	modalHeight := max(8, m.height-4)
-	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
-}
-
-func (m *Model) renderFilePickerRow(entry filePickerEntry, selected bool, width int) string {
-	label := entry.Name
-	if entry.IsDir {
-		label += string(filepath.Separator)
-	}
-	sizeStr := ""
-	if !entry.IsDir {
-		sizeStr = formatFileSize(entry.Size)
-	}
-	pad := width - lipgloss.Width(label) - lipgloss.Width(sizeStr)
-	if pad < 1 {
-		pad = 1
-	}
-	line := label + strings.Repeat(" ", pad) + style.Muted.Render(sizeStr)
-
-	rowStyle := lipgloss.NewStyle().Width(width)
-	if entry.IsDir {
-		rowStyle = rowStyle.Inherit(style.StatusOk)
-	}
-	if selected {
-		rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
-	}
-	return rowStyle.Render(line)
-}
-
-func (m *Model) filePickerVisibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
-	if len(m.filePicker.entries) == 0 {
-		return nil, false, false
-	}
-	if maxEntries <= 0 || len(m.filePicker.entries) <= maxEntries {
-		visible := make([]filePickerVisibleEntry, 0, len(m.filePicker.entries))
-		for idx, entry := range m.filePicker.entries {
-			visible = append(visible, filePickerVisibleEntry{index: idx, entry: entry})
-		}
-		return visible, false, false
-	}
-	start := m.filePicker.selected - (maxEntries / 2)
-	if start < 0 {
-		start = 0
-	}
-	end := start + maxEntries
-	if end > len(m.filePicker.entries) {
-		end = len(m.filePicker.entries)
-		start = end - maxEntries
-	}
-	visible := make([]filePickerVisibleEntry, 0, end-start)
-	for idx := start; idx < end; idx++ {
-		visible = append(visible, filePickerVisibleEntry{index: idx, entry: m.filePicker.entries[idx]})
-	}
-	return visible, start > 0, end < len(m.filePicker.entries)
 }
