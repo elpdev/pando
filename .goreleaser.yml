@@ -58,6 +58,7 @@ nfpms:
 brews:
   - name: pando
     ids: [pando-archive]
+    directory: Formula
     repository:
       owner: elpdev
       name: homebrew-tap

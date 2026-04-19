@@ -13,7 +13,7 @@ Private, encrypted terminal chat. End-to-end encrypted messages between people y
 
 ```bash
 brew tap elpdev/tap
-brew install pando
+brew install elpdev/tap/pando
 ```
 
 ### Arch Linux — AUR
