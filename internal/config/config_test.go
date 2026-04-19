@@ -158,3 +158,56 @@ func TestApplyRelayEnvRejectsInvalidIntegerEnvironmentOverrides(t *testing.T) {
 		})
 	}
 }
+
+func TestRelayValidateRejectsInvalidFields(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  Relay
+		want string
+	}{
+		{name: "missing addr", cfg: func() Relay { cfg := DefaultRelay(); cfg.StorePath = "/tmp/relay.db"; cfg.Addr = ""; return cfg }(), want: "listen address is required"},
+		{name: "missing store path", cfg: func() Relay { cfg := DefaultRelay(); cfg.StorePath = ""; return cfg }(), want: "relay store path is required"},
+		{name: "non-positive ttl", cfg: func() Relay { cfg := DefaultRelay(); cfg.StorePath = "/tmp/relay.db"; cfg.QueueTTL = 0; return cfg }(), want: "relay queue ttl must be positive"},
+		{name: "non-positive max message bytes", cfg: func() Relay {
+			cfg := DefaultRelay()
+			cfg.StorePath = "/tmp/relay.db"
+			cfg.MaxMessageBytes = 0
+			return cfg
+		}(), want: "relay max message bytes must be positive"},
+		{name: "non-positive max queued messages", cfg: func() Relay {
+			cfg := DefaultRelay()
+			cfg.StorePath = "/tmp/relay.db"
+			cfg.MaxQueuedMessages = 0
+			return cfg
+		}(), want: "relay max queued messages must be positive"},
+		{name: "non-positive max queued bytes", cfg: func() Relay {
+			cfg := DefaultRelay()
+			cfg.StorePath = "/tmp/relay.db"
+			cfg.MaxQueuedBytes = 0
+			return cfg
+		}(), want: "relay max queued bytes must be positive"},
+		{name: "non-positive rate limit", cfg: func() Relay {
+			cfg := DefaultRelay()
+			cfg.StorePath = "/tmp/relay.db"
+			cfg.RateLimitPerMinute = 0
+			return cfg
+		}(), want: "relay rate limit per minute must be positive"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.cfg.Validate()
+			if err == nil || err.Error() != tt.want {
+				t.Fatalf("expected %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
+func TestRelayValidateAcceptsValidConfig(t *testing.T) {
+	cfg := DefaultRelay()
+	cfg.StorePath = "/tmp/pando-relay.db"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate relay config: %v", err)
+	}
+}

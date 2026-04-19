@@ -2,6 +2,7 @@ package relay
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
 )
@@ -87,6 +89,27 @@ func TestRelayHandlersCoverLandingHealthAndDirectoryNotFound(t *testing.T) {
 		t.Fatalf("expected landing page ok, got %s", resp.Status)
 	}
 
+	resp, err = http.Get(server.URL + "/missing")
+	if err != nil {
+		t.Fatalf("get missing landing path: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected landing 404, got %s", resp.Status)
+	}
+
+	resp, err = http.Get(server.URL + "/logo.webp")
+	if err != nil {
+		t.Fatalf("get logo: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected logo ok, got %s", resp.Status)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "image/webp" {
+		t.Fatalf("expected webp content type, got %q", got)
+	}
+
 	resp, err = http.Get(server.URL + "/healthz")
 	if err != nil {
 		t.Fatalf("get health: %v", err)
@@ -108,6 +131,107 @@ func TestRelayHandlersCoverLandingHealthAndDirectoryNotFound(t *testing.T) {
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected directory not found, got %s", resp.Status)
+	}
+}
+
+func TestDirectoryHandlerRejectsMismatchConflictAndMethod(t *testing.T) {
+	server := httptest.NewServer(NewServer(testLogger(t), NewMemoryQueueStore(), Options{}).Handler())
+	defer server.Close()
+
+	alice := mustIdentity(t, "alice")
+	mallory := mustIdentity(t, "alice")
+	aliceSigned := mustSignedDirectoryEntryForRelay(t, alice, "alice", 1)
+	mallorySigned := mustSignedDirectoryEntryForRelay(t, mallory, "alice", 2)
+	mismatchSigned := mustSignedDirectoryEntryForRelay(t, alice, "bob", 3)
+
+	body, err := json.Marshal(*mismatchSigned)
+	if err != nil {
+		t.Fatalf("marshal mismatch entry: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/directory/mailboxes/alice", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("build mismatch request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put mismatch entry: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request for mismatch, got %s", resp.Status)
+	}
+
+	publishDirectoryEntry(t, server, alice)
+	body, err = json.Marshal(*mallorySigned)
+	if err != nil {
+		t.Fatalf("marshal conflicting entry: %v", err)
+	}
+	req, err = http.NewRequest(http.MethodPut, server.URL+"/directory/mailboxes/alice", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("build conflict request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put conflict entry: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("expected conflict, got %s", resp.Status)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/directory/mailboxes/alice", nil)
+	if err != nil {
+		t.Fatalf("build method request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post directory entry: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected method not allowed, got %s", resp.Status)
+	}
+	if allow := resp.Header.Get("Allow"); allow != "GET, PUT" {
+		t.Fatalf("expected allow header, got %q", allow)
+	}
+
+	_ = aliceSigned
+}
+
+func TestRendezvousHandlerRejectsDecodeErrorAndMethod(t *testing.T) {
+	server := httptest.NewServer(NewServer(testLogger(t), NewMemoryQueueStore(), Options{}).Handler())
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPut, server.URL+"/rendezvous/room", strings.NewReader("{"))
+	if err != nil {
+		t.Fatalf("build bad json request: %v", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put bad rendezvous payload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected bad request, got %s", resp.Status)
+	}
+
+	req, err = http.NewRequest(http.MethodPost, server.URL+"/rendezvous/room", nil)
+	if err != nil {
+		t.Fatalf("build method request: %v", err)
+	}
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("post rendezvous payload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("expected method not allowed, got %s", resp.Status)
+	}
+	if allow := resp.Header.Get("Allow"); allow != "GET, PUT, DELETE" {
+		t.Fatalf("expected allow header, got %q", allow)
 	}
 }
 
@@ -253,4 +377,13 @@ func testLogger(t *testing.T) *slog.Logger {
 
 func websocketTestBase64(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
+}
+
+func mustSignedDirectoryEntryForRelay(t *testing.T, id *identity.Identity, mailbox string, version int64) *relayapi.SignedDirectoryEntry {
+	t.Helper()
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: mailbox, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: version}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	return signed
 }
