@@ -160,7 +160,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
 				m.input.SetValue("")
 				m.syncViewport()
-				return m, m.sendCmd(displayBody, batch)
+				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
 			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {

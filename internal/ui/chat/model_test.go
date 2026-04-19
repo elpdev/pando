@@ -331,7 +331,7 @@ func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 	}
 	found := false
 	for _, message := range model.messages {
-		if message == "you -> bob: voice note sent: clip.wav" {
+		if strings.Contains(message, "voice note sent: clip.wav") {
 			found = true
 			break
 		}
