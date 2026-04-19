@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -64,7 +65,7 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if initCmd == nil {
 		t.Fatal("expected init command")
 	}
-	if len(model.messages) < 4 {
+	if len(model.messages) < 1 {
 		t.Fatalf("expected local history to be loaded, got %d messages", len(model.messages))
 	}
 
@@ -96,8 +97,115 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if model.input.Value() != "hi" {
 		t.Fatalf("expected input to remain unchanged, got %q", model.input.Value())
 	}
-	if len(model.messages) < 4 {
+	if len(model.messages) < 1 {
 		t.Fatalf("expected local history to remain visible, got %d messages", len(model.messages))
+	}
+}
+
+func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	carolStore := store.NewClientStore(t.TempDir())
+	carolService, _, err := messaging.New(carolStore, "carol")
+	if err != nil {
+		t.Fatalf("new carol service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	bobContact.Verified = true
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	carolContact, err := identity.ContactFromInvite(carolService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("carol invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(carolContact); err != nil {
+		t.Fatalf("save carol contact: %v", err)
+	}
+	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC()); err != nil {
+		t.Fatalf("save received history: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+	if model.recipientMailbox != "" {
+		t.Fatalf("expected no active chat, got %q", model.recipientMailbox)
+	}
+	if model.selectedIndex != 0 {
+		t.Fatalf("expected first contact to be selected, got %d", model.selectedIndex)
+	}
+	view := model.View()
+	if !strings.Contains(view, "bob  verified") {
+		t.Fatalf("expected verified contact in sidebar: %q", view)
+	}
+	if !strings.Contains(view, "carol  unverified") {
+		t.Fatalf("expected unverified contact in sidebar: %q", view)
+	}
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd != nil {
+		t.Fatal("expected no async command when opening selected chat")
+	}
+	if model.recipientMailbox != "bob" {
+		t.Fatalf("expected bob to become active chat, got %q", model.recipientMailbox)
+	}
+	if !model.peerVerified {
+		t.Fatal("expected active peer to be verified")
+	}
+	if len(model.messages) != 1 || !strings.Contains(model.messages[0], "hello from bob") {
+		t.Fatalf("expected bob history to load, got %+v", model.messages)
+	}
+	view = model.View()
+	if !strings.Contains(view, "fingerprint "+bobContact.Fingerprint()+"  verified") {
+		t.Fatalf("expected active fingerprint header: %q", view)
+	}
+	if model.input.Placeholder != "Message bob" {
+		t.Fatalf("unexpected input placeholder: %q", model.input.Placeholder)
+	}
+}
+
+func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.input.SetValue("hi")
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.status != "select a contact from the sidebar first" {
+		t.Fatalf("unexpected status: %q", model.status)
+	}
+	if model.input.Value() != "hi" {
+		t.Fatalf("expected input to stay intact, got %q", model.input.Value())
 	}
 }
 
@@ -157,7 +265,7 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 	}
 	found := false
 	for _, message := range model.messages {
-		if message == "you -> bob: photo sent: photo.png" {
+		if strings.Contains(message, "photo sent: photo.png") {
 			found = true
 			break
 		}

@@ -29,7 +29,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.ready = true
-		a.chat.SetSize(msg.Width-2, msg.Height-5)
+		a.chat.SetSize(msg.Width-2, msg.Height-2)
 		return a, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -47,7 +47,11 @@ func (a *App) View() string {
 		return "loading..."
 	}
 
-	header := lipgloss.NewStyle().Bold(true).Render("pando  mailbox=" + a.chat.Mailbox() + "  to=" + a.chat.RecipientMailbox())
+	headerText := "pando  mailbox=" + a.chat.Mailbox()
+	if a.chat.RecipientMailbox() != "" {
+		headerText += "  chat=" + a.chat.RecipientMailbox()
+	}
+	header := lipgloss.NewStyle().Bold(true).Render(headerText)
 	status := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(a.chat.Status())
 
 	return strings.Join([]string{header, status, a.chat.View()}, "\n")

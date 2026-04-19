@@ -54,9 +54,6 @@ func (c Client) Validate() error {
 	if strings.TrimSpace(c.Mailbox) == "" {
 		return fmt.Errorf("mailbox is required")
 	}
-	if strings.TrimSpace(c.RecipientMailbox) == "" {
-		return fmt.Errorf("recipient mailbox is required")
-	}
 	if strings.TrimSpace(c.RelayURL) == "" {
 		return fmt.Errorf("relay URL is required")
 	}

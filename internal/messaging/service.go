@@ -65,6 +65,10 @@ func (s *Service) Contact(mailbox string) (*identity.Contact, error) {
 	return s.store.LoadContact(mailbox)
 }
 
+func (s *Service) Contacts() ([]identity.Contact, error) {
+	return s.store.ListContacts()
+}
+
 func (s *Service) Devices() ([]identity.Device, error) {
 	if err := s.identity.Validate(); err != nil {
 		return nil, err

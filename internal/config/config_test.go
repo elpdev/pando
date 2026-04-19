@@ -24,6 +24,17 @@ func TestClientDataDirUsesCentralizedPandoRoot(t *testing.T) {
 	}
 }
 
+func TestClientValidateAllowsEmptyRecipientMailbox(t *testing.T) {
+	cfg := Client{
+		RelayURL: "ws://localhost:8080/ws",
+		Mailbox:  "alice",
+		DataDir:  "/tmp/pando/alice",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("validate client config: %v", err)
+	}
+}
+
 func TestRelayStorePathUsesCentralizedPandoRoot(t *testing.T) {
 	got := RelayStorePath(filepath.Join("/media", "flash-drive", "pando-data"))
 	want := filepath.Join("/media", "flash-drive", "pando-data", "relay", "relay.db")
