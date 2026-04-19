@@ -873,6 +873,41 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	}
 }
 
+func TestFilePickerVisibleEntriesStayWithinWindow(t *testing.T) {
+	model := &Model{}
+	for i := 0; i < 20; i++ {
+		model.filePickerEntries = append(model.filePickerEntries, filePickerEntry{Name: fmt.Sprintf("entry-%02d", i)})
+	}
+	model.filePickerSelected = 10
+
+	visible, hiddenAbove, hiddenBelow := model.filePickerVisibleEntries(5)
+	if !hiddenAbove {
+		t.Fatal("expected hidden entries above the visible window")
+	}
+	if !hiddenBelow {
+		t.Fatal("expected hidden entries below the visible window")
+	}
+	if len(visible) != 5 {
+		t.Fatalf("expected 5 visible entries, got %d", len(visible))
+	}
+	if visible[0].entry.Name != "entry-08" {
+		t.Fatalf("expected window to start near selection, got %q", visible[0].entry.Name)
+	}
+	if visible[len(visible)-1].entry.Name != "entry-12" {
+		t.Fatalf("expected window to end at final entry, got %q", visible[len(visible)-1].entry.Name)
+	}
+	foundSelected := false
+	for _, entry := range visible {
+		if entry.index == model.filePickerSelected {
+			foundSelected = true
+			break
+		}
+	}
+	if !foundSelected {
+		t.Fatal("expected selected entry to stay visible")
+	}
+}
+
 func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := messaging.New(aliceStore, "alice")
