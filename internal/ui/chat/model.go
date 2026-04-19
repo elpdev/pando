@@ -56,6 +56,10 @@ type Model struct {
 	localTypingSent     bool
 	localTypingPeer     string
 	localTypingAt       time.Time
+	addContactValue     string
+	addContactError     string
+	addContactImporting bool
+	addContactOpen      bool
 	width               int
 	height              int
 	sidebarWidth        int
@@ -66,6 +70,10 @@ type connectResultMsg struct{ err error }
 type reconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
+type addContactResultMsg struct {
+	contact *identity.Contact
+	err     error
+}
 type sendResultMsg struct {
 	recipient string
 	messageID string
@@ -78,6 +86,7 @@ const (
 	typingIdleTimeout       = 2 * time.Second
 	typingStateActive       = "active"
 	typingStateIdle         = "idle"
+	addContactLimit         = 16384
 )
 
 func New(deps Deps) *Model {
@@ -122,6 +131,13 @@ func (m *Model) SetSize(width, height int) {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.addContactOpen {
+			return m.handleAddContactKey(msg)
+		}
+		if msg.Type == tea.KeyCtrlN {
+			m.openAddContactModal()
+			return m, nil
+		}
 		switch msg.Type {
 		case tea.KeyUp:
 			m.moveSelection(-1)
@@ -284,6 +300,18 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.status = fmt.Sprintf("typing indicator failed: %v", msg.err)
 		}
 		return m, nil
+	case addContactResultMsg:
+		m.addContactImporting = false
+		if msg.err != nil {
+			m.addContactError = msg.err.Error()
+			return m, nil
+		}
+		m.upsertContact(msg.contact)
+		m.selectContact(msg.contact.AccountID)
+		m.activateSelectedContact()
+		m.closeAddContactModal(true)
+		m.status = fmt.Sprintf("added verified contact %s", msg.contact.AccountID)
+		return m, nil
 	}
 
 	previousValue := m.input.Value()
@@ -316,7 +344,11 @@ func (m *Model) View() string {
 	}
 	left := m.renderSidebar()
 	right := m.renderConversation()
-	return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	view := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	if !m.addContactOpen {
+		return view
+	}
+	return m.renderAddContactModal(view)
 }
 
 func (m *Model) Status() string {
@@ -552,6 +584,101 @@ func (m *Model) moveSelection(delta int) {
 	}
 }
 
+func (m *Model) selectContact(mailbox string) {
+	for idx := range m.contacts {
+		if m.contacts[idx].Mailbox == mailbox {
+			m.selectedIndex = idx
+			return
+		}
+	}
+}
+
+func (m *Model) openAddContactModal() {
+	m.addContactOpen = true
+	m.addContactError = ""
+	m.addContactImporting = false
+	m.addContactValue = ""
+	m.input.Blur()
+}
+
+func (m *Model) closeAddContactModal(keepStatus bool) {
+	m.addContactOpen = false
+	m.addContactImporting = false
+	m.addContactError = ""
+	m.addContactValue = ""
+	if !keepStatus {
+		m.status = "add contact cancelled"
+	}
+	m.input.Focus()
+}
+
+func (m *Model) handleAddContactKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.closeAddContactModal(false)
+		return m, nil
+	case tea.KeyCtrlS:
+		if m.addContactImporting {
+			return m, nil
+		}
+		trimmed := strings.TrimSpace(m.addContactValue)
+		if trimmed == "" {
+			m.addContactError = "invite input is empty"
+			return m, nil
+		}
+		m.addContactError = ""
+		m.addContactImporting = true
+		return m, m.importContactCmd(trimmed)
+	case tea.KeyEnter, tea.KeyCtrlJ:
+		m.appendAddContactText("\n")
+		return m, nil
+	case tea.KeyBackspace, tea.KeyCtrlH, tea.KeyDelete:
+		m.deleteAddContactRune()
+		return m, nil
+	case tea.KeyCtrlU:
+		m.addContactValue = ""
+		m.addContactError = ""
+		return m, nil
+	case tea.KeyRunes:
+		m.appendAddContactText(string(msg.Runes))
+		return m, nil
+	default:
+		return m, nil
+	}
+}
+
+func (m *Model) appendAddContactText(text string) {
+	if text == "" || len([]rune(m.addContactValue)) >= addContactLimit {
+		return
+	}
+	remaining := addContactLimit - len([]rune(m.addContactValue))
+	runes := []rune(text)
+	if len(runes) > remaining {
+		runes = runes[:remaining]
+	}
+	m.addContactValue += string(runes)
+	m.addContactError = ""
+}
+
+func (m *Model) deleteAddContactRune() {
+	runes := []rune(m.addContactValue)
+	if len(runes) == 0 {
+		return
+	}
+	m.addContactValue = string(runes[:len(runes)-1])
+	m.addContactError = ""
+}
+
+func (m *Model) importContactCmd(text string) tea.Cmd {
+	return func() tea.Msg {
+		contact, err := m.messaging.ImportContactInviteText(text, true)
+		if err != nil {
+			return addContactResultMsg{err: err}
+		}
+		return addContactResultMsg{contact: contact}
+	}
+}
+
 func (m *Model) activateSelectedContact() bool {
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.contacts) {
 		return false
@@ -646,10 +773,14 @@ func (m *Model) updateLayout() {
 func (m *Model) renderSidebar() string {
 	border := lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()).BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).BorderForeground(lipgloss.Color("238"))
 	title := lipgloss.NewStyle().Bold(true).Render("Contacts")
-	lines := []string{title, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("up/down to browse, enter to open")}
+	shortcut := "up/down browse  enter open  ctrl+n add"
+	if m.addContactOpen {
+		shortcut = "add contact open  ctrl+s import  esc cancel"
+	}
+	lines := []string{title, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(shortcut)}
 	if len(m.contacts) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("No contacts yet."))
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Import one with pando contact add."))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ctrl+n to add one here."))
 		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
 	}
 	for idx, contact := range m.contacts {
@@ -678,6 +809,7 @@ func (m *Model) renderConversation() string {
 		empty := []string{
 			lipgloss.NewStyle().Bold(true).Render("No chat selected"),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Pick a contact from the sidebar to load the conversation."),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Press ctrl+n to import a verified contact without leaving the TUI."),
 			lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Verified contacts are labeled directly in the roster."),
 			"",
 			m.input.View(),
@@ -692,6 +824,52 @@ func (m *Model) renderConversation() string {
 		m.input.View(),
 	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(header, "\n"))
+}
+
+func (m *Model) renderAddContactModal(base string) string {
+	modalWidth := min(max(58, m.width*2/3), max(40, m.width-6))
+	modalHeight := min(max(15, m.height*2/3), max(12, m.height-4))
+	if modalWidth <= 0 || modalHeight <= 0 {
+		return base
+	}
+	bodyWidth := max(24, modalWidth-6)
+	inputHeight := max(5, modalHeight-10)
+	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Render("Add Contact")
+	description := lipgloss.NewStyle().Foreground(lipgloss.Color("248")).Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Imported contacts are marked verified immediately and opened right away.")
+	input := m.renderAddContactEditor(bodyWidth, inputHeight)
+	footerText := "enter newline  ctrl+s import  ctrl+u clear  esc cancel"
+	if m.addContactImporting {
+		footerText = "importing contact..."
+	}
+	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render(footerText)
+	parts := []string{title, description, input}
+	if m.addContactError != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Width(bodyWidth).Render(m.addContactError))
+	}
+	parts = append(parts, footer)
+	modal := lipgloss.NewStyle().Width(modalWidth).Padding(1, 2).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("69")).Background(lipgloss.Color("235")).Render(strings.Join(parts, "\n\n"))
+	background := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(base)
+	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+}
+
+func (m *Model) renderAddContactEditor(width, height int) string {
+	content := m.addContactValue
+	if content == "" {
+		content = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("account: alice\nfingerprint: ...\ninvite-code: ...")
+	} else {
+		content += lipgloss.NewStyle().Foreground(lipgloss.Color("69")).Render("█")
+	}
+	lines := strings.Split(content, "\n")
+	if len(lines) > height {
+		lines = lines[len(lines)-height:]
+	}
+	visible := strings.Join(lines, "\n")
+	meta := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render(fmt.Sprintf("%d chars", len([]rune(m.addContactValue))))
+	if len(m.addContactValue) >= addContactLimit {
+		meta = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(fmt.Sprintf("input limit reached (%d chars)", addContactLimit))
+	}
+	box := lipgloss.NewStyle().Width(width).Height(height).Padding(0, 1).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).Render(visible)
+	return strings.Join([]string{box, meta}, "\n")
 }
 
 func (m *Model) renderTypingIndicator() string {

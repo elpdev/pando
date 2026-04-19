@@ -12,6 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/store"
@@ -206,6 +207,182 @@ func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
 	}
 	if model.input.Value() != "hi" {
 		t.Fatalf("expected input to stay intact, got %q", model.input.Value())
+	}
+}
+
+func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if !model.addContactOpen {
+		t.Fatal("expected add contact modal to open")
+	}
+	view := model.View()
+	if !strings.Contains(view, "Add Contact") {
+		t.Fatalf("expected add contact modal in view: %q", view)
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.addContactOpen {
+		t.Fatal("expected add contact modal to close")
+	}
+	if model.status != "add contact cancelled" {
+		t.Fatalf("unexpected status: %q", model.status)
+	}
+}
+
+func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	code, err := invite.EncodeCode(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("encode invite code: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: aliceService,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(code), Paste: true})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("expected import command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected import result message")
+	}
+	_, _ = model.Update(msg)
+
+	if model.addContactOpen {
+		t.Fatal("expected add contact modal to close after import")
+	}
+	if model.recipientMailbox != "bob" {
+		t.Fatalf("expected imported contact to become active chat, got %q", model.recipientMailbox)
+	}
+	if !model.peerVerified {
+		t.Fatal("expected imported contact to be verified")
+	}
+	if model.status != "added verified contact bob" {
+		t.Fatalf("unexpected status: %q", model.status)
+	}
+	view := model.View()
+	if !strings.Contains(view, "bob  verified") {
+		t.Fatalf("expected imported contact in sidebar: %q", view)
+	}
+	if !strings.Contains(view, "fingerprint "+bobService.Identity().Fingerprint()+"  verified") {
+		t.Fatalf("expected verified fingerprint header: %q", view)
+	}
+	contact, err := aliceStore.LoadContact("bob")
+	if err != nil {
+		t.Fatalf("load imported contact: %v", err)
+	}
+	if !contact.Verified {
+		t.Fatal("expected imported contact to be saved as verified")
+	}
+}
+
+func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	code, err := invite.EncodeCode(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("encode invite code: %v", err)
+	}
+	pasted := "account: bob\nfingerprint: " + bobService.Identity().Fingerprint() + "\ninvite-code: " + code + "\n"
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: aliceService,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("expected import command")
+	}
+	_, _ = model.Update(cmd())
+	if model.recipientMailbox != "bob" {
+		t.Fatalf("expected verbose invite paste to import bob, got %q", model.recipientMailbox)
+	}
+	if !model.peerVerified {
+		t.Fatal("expected verbose invite import to verify contact")
+	}
+}
+
+func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+	badInvite := "not a valid invite"
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(badInvite), Paste: true})
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlS})
+	if cmd == nil {
+		t.Fatal("expected import command")
+	}
+	_, _ = model.Update(cmd())
+
+	if !model.addContactOpen {
+		t.Fatal("expected modal to stay open on error")
+	}
+	if model.addContactValue != badInvite {
+		t.Fatalf("expected bad invite to remain for editing, got %q", model.addContactValue)
+	}
+	if !strings.Contains(model.addContactError, "decode invite input") {
+		t.Fatalf("expected decode error, got %q", model.addContactError)
+	}
+	view := model.View()
+	if !strings.Contains(view, "decode invite input") {
+		t.Fatalf("expected inline error in modal: %q", view)
 	}
 }
 
