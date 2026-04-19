@@ -197,6 +197,85 @@ func TestDeliveryAckMarksSentHistoryDelivered(t *testing.T) {
 	}
 }
 
+func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	envelopes, err := bobService.TypingEnvelopes("alice", typingStateActive)
+	if err != nil {
+		t.Fatalf("typing envelopes: %v", err)
+	}
+	if len(envelopes) != 1 {
+		t.Fatalf("expected one typing envelope, got %d", len(envelopes))
+	}
+	result, err := aliceService.HandleIncoming(envelopes[0])
+	if err != nil {
+		t.Fatalf("handle typing envelope: %v", err)
+	}
+	if result == nil || !result.Control {
+		t.Fatalf("expected typing envelope to be control result: %+v", result)
+	}
+	if result.PeerAccountID != "bob" {
+		t.Fatalf("expected bob peer account, got %q", result.PeerAccountID)
+	}
+	if result.TypingState != typingStateActive {
+		t.Fatalf("expected active typing state, got %q", result.TypingState)
+	}
+	if result.TypingExpiresAt.IsZero() {
+		t.Fatal("expected typing expiry")
+	}
+	if len(result.AckEnvelopes) != 0 {
+		t.Fatalf("expected no delivery acks for typing payload, got %d", len(result.AckEnvelopes))
+	}
+	history, err := aliceService.History("bob")
+	if err != nil {
+		t.Fatalf("load alice history: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("expected typing indicator to stay out of history: %+v", history)
+	}
+
+	idleEnvelopes, err := bobService.TypingEnvelopes("alice", typingStateIdle)
+	if err != nil {
+		t.Fatalf("idle typing envelopes: %v", err)
+	}
+	if len(idleEnvelopes) != 1 {
+		t.Fatalf("expected one idle typing envelope, got %d", len(idleEnvelopes))
+	}
+	idleResult, err := aliceService.HandleIncoming(idleEnvelopes[0])
+	if err != nil {
+		t.Fatalf("handle idle typing envelope: %v", err)
+	}
+	if idleResult == nil || idleResult.TypingState != typingStateIdle {
+		t.Fatalf("expected idle typing result: %+v", idleResult)
+	}
+	if !idleResult.TypingExpiresAt.IsZero() {
+		t.Fatalf("expected idle typing expiry to be cleared, got %v", idleResult.TypingExpiresAt)
+	}
+}
+
 func TestEncryptOutgoingMissingContactSuggestsImportCommand(t *testing.T) {
 	service, _, err := New(store.NewClientStore(t.TempDir()), "alice")
 	if err != nil {

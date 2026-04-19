@@ -23,6 +23,7 @@ const (
 	incomingAttachmentTTL             = 15 * time.Minute
 	maxPendingIncomingAttachments     = 128
 	maxPendingIncomingAttachmentsPeer = 16
+	typingIndicatorTTL                = 5 * time.Second
 )
 
 type deliveryAck struct {
@@ -31,13 +32,15 @@ type deliveryAck struct {
 }
 
 type IncomingResult struct {
-	Duplicate      bool
-	Control        bool
-	PeerAccountID  string
-	Body           string
-	MessageID      string
-	ContactUpdated *identity.Contact
-	AckEnvelopes   []protocol.Envelope
+	Duplicate       bool
+	Control         bool
+	PeerAccountID   string
+	Body            string
+	MessageID       string
+	ContactUpdated  *identity.Contact
+	AckEnvelopes    []protocol.Envelope
+	TypingState     string
+	TypingExpiresAt time.Time
 }
 
 type OutgoingBatch struct {
@@ -143,6 +146,30 @@ func (s *Service) PrepareVoiceOutgoing(recipientAccountID, path string) (*Outgoi
 	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeVoice)
 }
 
+func (s *Service) TypingEnvelopes(recipientAccountID, state string) ([]protocol.Envelope, error) {
+	switch state {
+	case typingStateActive, typingStateIdle:
+	default:
+		return nil, fmt.Errorf("invalid typing state %q", state)
+	}
+	contact, err := s.store.LoadContact(recipientAccountID)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return nil, missingContactError(recipientAccountID)
+		}
+		return nil, err
+	}
+	payload := contentPayload{Kind: contentKindTyping, Typing: &typingIndicator{State: state}}
+	if state == typingStateActive {
+		payload.Typing.ExpiresAt = time.Now().UTC().Add(typingIndicatorTTL)
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode typing payload: %w", err)
+	}
+	return session.Encrypt(s.identity, contact, string(body))
+}
+
 func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachmentType string) (*OutgoingBatch, string, error) {
 	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
@@ -238,6 +265,13 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 			return nil, err
 		}
 		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, nil
+	}
+	if ok && payload.Kind == contentKindTyping {
+		typing, err := s.parseTypingPayload(payload)
+		if err != nil {
+			return nil, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, TypingState: typing.State, TypingExpiresAt: typing.ExpiresAt}, nil
 	}
 	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
 	if err != nil {
@@ -447,4 +481,22 @@ func (s *Service) parseDeliveryAckPayload(payload *contentPayload) (*deliveryAck
 		ack.DeliveredAt = time.Now().UTC()
 	}
 	return &ack, nil
+}
+
+func (s *Service) parseTypingPayload(payload *contentPayload) (*typingIndicator, error) {
+	if payload == nil || payload.Typing == nil {
+		return nil, fmt.Errorf("typing payload is required")
+	}
+	typing := *payload.Typing
+	switch typing.State {
+	case typingStateActive:
+		if typing.ExpiresAt.IsZero() {
+			return nil, fmt.Errorf("typing expiry is required")
+		}
+	case typingStateIdle:
+		typing.ExpiresAt = time.Time{}
+	default:
+		return nil, fmt.Errorf("invalid typing state %q", typing.State)
+	}
+	return &typing, nil
 }

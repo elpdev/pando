@@ -29,6 +29,7 @@ func Execute(args []string) error {
 	fs.IntVar(&cfg.MaxQueuedBytes, "max-queued-bytes", cfg.MaxQueuedBytes, "maximum queued payload bytes per mailbox")
 	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute, "maximum publishes per sender mailbox per minute")
 	fs.StringVar(&cfg.AuthToken, "auth-token", cfg.AuthToken, "optional shared token required for relay websocket access")
+	fs.BoolVar(&cfg.LandingPage, "landing-page", cfg.LandingPage, "serve the landing page and logo at / and /logo.webp")
 
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -53,6 +54,7 @@ func Execute(args []string) error {
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
 		AuthToken:          cfg.AuthToken,
 		AllowedOrigins:     cfg.AllowedOrigins,
+		LandingPage:        cfg.LandingPage,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

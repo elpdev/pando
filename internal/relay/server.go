@@ -86,8 +86,10 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.handleLanding)
-	mux.HandleFunc("/logo.webp", s.handleLogo)
+	if s.options.LandingPage {
+		mux.HandleFunc("/", s.handleLanding)
+		mux.HandleFunc("/logo.webp", s.handleLogo)
+	}
 	mux.HandleFunc("/ws", s.handleWebSocket)
 	mux.HandleFunc("/up", s.handleHealth)
 	mux.HandleFunc("/healthz", s.handleHealth)

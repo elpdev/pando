@@ -16,6 +16,7 @@ type Options struct {
 	RateLimitPerMinute int
 	AuthToken          string
 	AllowedOrigins     []string
+	LandingPage        bool
 }
 
 type QueueLimits struct {

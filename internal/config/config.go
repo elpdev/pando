@@ -37,6 +37,7 @@ type Relay struct {
 	RateLimitPerMinute int
 	AuthToken          string
 	AllowedOrigins     []string
+	LandingPage        bool
 }
 
 func DefaultClient() Client {
@@ -156,6 +157,13 @@ func ApplyRelayEnv(cfg *Relay) error {
 	}
 	if value, ok := lookupEnvTrimmed("PANDO_RELAY_ALLOWED_ORIGINS"); ok {
 		cfg.AllowedOrigins = splitCommaList(value)
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_LANDING_PAGE"); ok {
+		parsed, err := strconv.ParseBool(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_LANDING_PAGE %q: %w", value, err)
+		}
+		cfg.LandingPage = parsed
 	}
 	return nil
 }
