@@ -161,7 +161,7 @@ func TestRunImportContactWithStdin(t *testing.T) {
 	}
 
 	withPatchedStdin(t, code+"\n", func() {
-		if err := runImportContactWithName("add-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
+		if err := runImportContactWithName("contact add", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
 			t.Fatalf("import contact from stdin: %v", err)
 		}
 	})
@@ -174,7 +174,7 @@ func TestRunImportContactWithStdin(t *testing.T) {
 		t.Fatalf("expected alice contact, got %q", contact.AccountID)
 	}
 	if !contact.Verified {
-		t.Fatalf("expected add-contact to verify imported contact")
+		t.Fatalf("expected contact add to verify imported contact")
 	}
 }
 
@@ -197,7 +197,7 @@ func TestRunImportContactWithPaste(t *testing.T) {
 	pasted := "account: alice\nfingerprint: " + aliceID.Fingerprint() + "\ninvite-code: " + code + "\n"
 
 	withPatchedStdin(t, pasted, func() {
-		if err := runImportContactWithName("add-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-paste"}); err != nil {
+		if err := runImportContactWithName("contact add", []string{"-mailbox", "bob", "-data-dir", bobDir, "-paste"}); err != nil {
 			t.Fatalf("import contact from paste: %v", err)
 		}
 	})
@@ -225,7 +225,7 @@ func TestRunImportContactLeavesContactUnverified(t *testing.T) {
 	}
 
 	withPatchedStdin(t, code+"\n", func() {
-		if err := runImportContactWithName("import-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
+		if err := runImportContactWithName("contact import", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
 			t.Fatalf("import contact from stdin: %v", err)
 		}
 	})
@@ -235,7 +235,7 @@ func TestRunImportContactLeavesContactUnverified(t *testing.T) {
 		t.Fatalf("load alice contact: %v", err)
 	}
 	if contact.Verified {
-		t.Fatalf("expected import-contact to leave contact unverified")
+		t.Fatalf("expected contact import to leave contact unverified")
 	}
 }
 
@@ -258,7 +258,7 @@ func TestRunAddContactOutputShowsVerification(t *testing.T) {
 
 	output := captureStdout(t, func() {
 		withPatchedStdin(t, code+"\n", func() {
-			if err := runImportContactWithName("add-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
+			if err := runImportContactWithName("contact add", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
 				t.Fatalf("add contact from stdin: %v", err)
 			}
 		})
@@ -266,7 +266,7 @@ func TestRunAddContactOutputShowsVerification(t *testing.T) {
 	if !strings.Contains(output, "verified contact alice (") {
 		t.Fatalf("expected verification confirmation in output, got %q", output)
 	}
-	if strings.Contains(output, "next: pandoctl verify-contact") {
+	if strings.Contains(output, "next: pando contact verify") {
 		t.Fatalf("expected no manual verify step in output, got %q", output)
 	}
 }
@@ -305,8 +305,34 @@ func TestRunInviteCodeDefaultShowsNextStep(t *testing.T) {
 			t.Fatalf("run invite code: %v", err)
 		}
 	})
-	if !strings.Contains(output, "the other person can import it with: pandoctl add-contact --mailbox <their-mailbox> --paste") {
+	if !strings.Contains(output, "the other person can import it with: pando contact add --mailbox <their-mailbox> --paste") {
 		t.Fatalf("expected next-step guidance in output, got %q", output)
+	}
+}
+
+func TestExecuteGroupedIdentityInit(t *testing.T) {
+	dataDir := t.TempDir()
+	output := captureStdout(t, func() {
+		if err := Execute([]string{"identity", "init", "-mailbox", "alice", "-data-dir", dataDir}); err != nil {
+			t.Fatalf("execute identity init: %v", err)
+		}
+	})
+	if !strings.Contains(output, "initialized identity for alice on device alice") && !strings.Contains(output, "identity already exists for alice on device alice") {
+		t.Fatalf("unexpected identity init output: %q", output)
+	}
+}
+
+func TestExecuteGroupedConfigSetRelayToken(t *testing.T) {
+	rootDir := t.TempDir()
+	if err := Execute([]string{"config", "set", "relay-token", "-root-dir", rootDir, "secret-token"}); err != nil {
+		t.Fatalf("execute config set relay-token: %v", err)
+	}
+	bytes, err := os.ReadFile(filepath.Join(rootDir, "config.yml"))
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	if !strings.Contains(string(bytes), "relay_token: secret-token") {
+		t.Fatalf("expected relay token in config file, got %q", string(bytes))
 	}
 }
 

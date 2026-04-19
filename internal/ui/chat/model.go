@@ -649,7 +649,7 @@ func (m *Model) renderSidebar() string {
 	lines := []string{title, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("up/down to browse, enter to open")}
 	if len(m.contacts) == 0 {
 		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("No contacts yet."))
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Import one with pandoctl add-contact."))
+		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("Import one with pando contact add."))
 		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
 	}
 	for idx, contact := range m.contacts {

@@ -25,49 +25,136 @@ import (
 
 func Execute(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl <init|show-identity|invite-code|export-invite|add-contact|import-contact|list-contacts|show-contact|verify-contact|list-devices|create-enrollment|approve-enrollment|complete-enrollment|revoke-device|eject|config> [flags]")
+		return fmt.Errorf("usage: pando <identity|contact|device|config|eject|help> [flags]")
 	}
 
 	switch args[0] {
-	case "init":
-		return runInit(args[1:])
-	case "show-identity":
-		return runShowIdentity(args[1:])
-	case "invite-code":
-		return runInviteCode(args[1:])
-	case "export-invite":
-		return runExportInvite(args[1:])
-	case "add-contact":
-		return runAddContact(args[1:])
-	case "import-contact":
-		return runImportContact(args[1:])
-	case "list-contacts":
-		return runListContacts(args[1:])
-	case "show-contact":
-		return runShowContact(args[1:])
-	case "verify-contact":
-		return runVerifyContact(args[1:])
-	case "list-devices":
-		return runListDevices(args[1:])
-	case "create-enrollment":
-		return runCreateEnrollment(args[1:])
-	case "approve-enrollment":
-		return runApproveEnrollment(args[1:])
-	case "complete-enrollment":
-		return runCompleteEnrollment(args[1:])
-	case "revoke-device":
-		return runRevokeDevice(args[1:])
+	case "identity":
+		return runIdentity(args[1:])
+	case "contact":
+		return runContact(args[1:])
+	case "device":
+		return runDevice(args[1:])
 	case "eject":
 		return runEject(args[1:])
 	case "config":
 		return runConfig(args[1:])
+	case "help":
+		return runHelp(args[1:])
 	default:
 		return fmt.Errorf("unknown subcommand %q", args[0])
 	}
 }
 
+func IsSubcommand(arg string) bool {
+	switch arg {
+	case "identity", "contact", "device", "config", "eject", "help":
+		return true
+	default:
+		return false
+	}
+}
+
+func runHelp(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando <identity|contact|device|config|eject> [flags]")
+	}
+	switch args[0] {
+	case "identity":
+		return fmt.Errorf("usage: pando identity <init|show|invite-code|export-invite> [flags]")
+	case "contact":
+		return fmt.Errorf("usage: pando contact <add|import|list|show|verify> [flags]")
+	case "device":
+		return fmt.Errorf("usage: pando device <list|revoke|enroll> [flags]")
+	case "config":
+		return fmt.Errorf("usage: pando config <show|set> [flags]")
+	case "eject":
+		return fmt.Errorf("usage: pando eject --mailbox <mailbox> [flags]")
+	default:
+		return fmt.Errorf("unknown help topic %q", args[0])
+	}
+}
+
+func runIdentity(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando identity <init|show|invite-code|export-invite> [flags]")
+	}
+	switch args[0] {
+	case "init":
+		return runInit(args[1:])
+	case "show":
+		return runShowIdentity(args[1:])
+	case "invite-code":
+		return runInviteCode(args[1:])
+	case "export-invite":
+		return runExportInvite(args[1:])
+	case "help":
+		return runHelp([]string{"identity"})
+	default:
+		return fmt.Errorf("unknown identity subcommand %q", args[0])
+	}
+}
+
+func runContact(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando contact <add|import|list|show|verify> [flags]")
+	}
+	switch args[0] {
+	case "add":
+		return runAddContact(args[1:])
+	case "import":
+		return runImportContact(args[1:])
+	case "list":
+		return runListContacts(args[1:])
+	case "show":
+		return runShowContact(args[1:])
+	case "verify":
+		return runVerifyContact(args[1:])
+	case "help":
+		return runHelp([]string{"contact"})
+	default:
+		return fmt.Errorf("unknown contact subcommand %q", args[0])
+	}
+}
+
+func runDevice(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando device <list|revoke|enroll> [flags]")
+	}
+	switch args[0] {
+	case "list":
+		return runListDevices(args[1:])
+	case "revoke":
+		return runRevokeDevice(args[1:])
+	case "enroll":
+		return runDeviceEnroll(args[1:])
+	case "help":
+		return runHelp([]string{"device"})
+	default:
+		return fmt.Errorf("unknown device subcommand %q", args[0])
+	}
+}
+
+func runDeviceEnroll(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando device enroll <create|approve|complete> [flags]")
+	}
+	switch args[0] {
+	case "create":
+		return runCreateEnrollment(args[1:])
+	case "approve":
+		return runApproveEnrollment(args[1:])
+	case "complete":
+		return runCompleteEnrollment(args[1:])
+	case "help":
+		return fmt.Errorf("usage: pando device enroll <create|approve|complete> [flags]")
+	default:
+		return fmt.Errorf("unknown device enroll subcommand %q", args[0])
+	}
+}
+
 func runInit(args []string) error {
-	mailbox, dataDir, err := parseClientFlags("init", args)
+	mailbox, dataDir, err := parseClientFlags("identity init", args)
 	if err != nil {
 		return err
 	}
@@ -86,7 +173,7 @@ func runInit(args []string) error {
 }
 
 func runShowIdentity(args []string) error {
-	mailbox, dataDir, err := parseClientFlags("show-identity", args)
+	mailbox, dataDir, err := parseClientFlags("identity show", args)
 	if err != nil {
 		return err
 	}
@@ -105,7 +192,7 @@ func runShowIdentity(args []string) error {
 }
 
 func runExportInvite(args []string) error {
-	fs := flag.NewFlagSet("export-invite", flag.ContinueOnError)
+	fs := flag.NewFlagSet("identity export-invite", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -139,7 +226,7 @@ func runExportInvite(args []string) error {
 }
 
 func runInviteCode(args []string) error {
-	fs := flag.NewFlagSet("invite-code", flag.ContinueOnError)
+	fs := flag.NewFlagSet("identity invite-code", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -171,7 +258,7 @@ func runInviteCode(args []string) error {
 			return fmt.Errorf("copy invite code: %w", err)
 		}
 		fmt.Printf("copied invite code for %s to clipboard\n", id.AccountID)
-		fmt.Println("tell the other person to run: pandoctl add-contact --mailbox <their-mailbox> --from-clipboard")
+		fmt.Println("tell the other person to run: pando contact add --mailbox <their-mailbox> --from-clipboard")
 	}
 	if *rawOutput {
 		fmt.Println(code)
@@ -181,23 +268,23 @@ func runInviteCode(args []string) error {
 		fmt.Printf("account: %s\n", id.AccountID)
 		fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 		qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stdout)
-		fmt.Println("share this QR or import a saved QR image with: pandoctl add-contact --mailbox <their-mailbox> --qr-image <path>")
+		fmt.Println("share this QR or import a saved QR image with: pando contact add --mailbox <their-mailbox> --qr-image <path>")
 		return nil
 	}
 	fmt.Printf("account: %s\n", id.AccountID)
 	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
 	fmt.Printf("invite-code: %s\n", code)
 	fmt.Println("share the invite-code value above, or use --raw, --copy, or --qr for easier sharing")
-	fmt.Println("the other person can import it with: pandoctl add-contact --mailbox <their-mailbox> --paste")
+	fmt.Println("the other person can import it with: pando contact add --mailbox <their-mailbox> --paste")
 	return nil
 }
 
 func runAddContact(args []string) error {
-	return runImportContactWithName("add-contact", args)
+	return runImportContactWithName("contact add", args)
 }
 
 func runImportContact(args []string) error {
-	return runImportContactWithName("import-contact", args)
+	return runImportContactWithName("contact import", args)
 }
 
 func runImportContactWithName(name string, args []string) error {
@@ -245,7 +332,7 @@ func runImportContactWithName(name string, args []string) error {
 	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
 		contact.Verified = existing.Verified
 	}
-	if name == "add-contact" {
+	if name == "contact add" {
 		contact.Verified = true
 	}
 	if err := clientStore.SaveContact(contact); err != nil {
@@ -256,7 +343,7 @@ func runImportContactWithName(name string, args []string) error {
 	if contact.Verified {
 		fmt.Printf("verified contact %s (%s)\n", contact.AccountID, contact.Fingerprint())
 	} else {
-		fmt.Printf("next: pandoctl verify-contact --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
+		fmt.Printf("next: pando contact verify --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
 	}
 	return nil
 }
@@ -300,7 +387,7 @@ func validateInviteInputFlags(invitePath, inviteCode string, readStdin, readPast
 }
 
 func runListContacts(args []string) error {
-	mailbox, dataDir, err := parseClientFlags("list-contacts", args)
+	mailbox, dataDir, err := parseClientFlags("contact list", args)
 	if err != nil {
 		return err
 	}
@@ -331,7 +418,7 @@ func runListContacts(args []string) error {
 }
 
 func runShowContact(args []string) error {
-	fs := flag.NewFlagSet("show-contact", flag.ContinueOnError)
+	fs := flag.NewFlagSet("contact show", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -361,7 +448,7 @@ func runShowContact(args []string) error {
 }
 
 func runVerifyContact(args []string) error {
-	fs := flag.NewFlagSet("verify-contact", flag.ContinueOnError)
+	fs := flag.NewFlagSet("contact verify", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "local mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -395,7 +482,7 @@ func runVerifyContact(args []string) error {
 }
 
 func runListDevices(args []string) error {
-	mailbox, dataDir, err := parseClientFlags("list-devices", args)
+	mailbox, dataDir, err := parseClientFlags("device list", args)
 	if err != nil {
 		return err
 	}
@@ -408,7 +495,7 @@ func runListDevices(args []string) error {
 }
 
 func runCreateEnrollment(args []string) error {
-	fs := flag.NewFlagSet("create-enrollment", flag.ContinueOnError)
+	fs := flag.NewFlagSet("device enroll create", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	accountID := fs.String("account", "", "stable account identifier")
 	mailbox := fs.String("mailbox", "", "new device mailbox identifier")
@@ -449,7 +536,7 @@ func runCreateEnrollment(args []string) error {
 }
 
 func runApproveEnrollment(args []string) error {
-	fs := flag.NewFlagSet("approve-enrollment", flag.ContinueOnError)
+	fs := flag.NewFlagSet("device enroll approve", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "trusted device mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -501,7 +588,7 @@ func runApproveEnrollment(args []string) error {
 }
 
 func runCompleteEnrollment(args []string) error {
-	fs := flag.NewFlagSet("complete-enrollment", flag.ContinueOnError)
+	fs := flag.NewFlagSet("device enroll complete", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "new device mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -548,7 +635,7 @@ func runCompleteEnrollment(args []string) error {
 }
 
 func runRevokeDevice(args []string) error {
-	fs := flag.NewFlagSet("revoke-device", flag.ContinueOnError)
+	fs := flag.NewFlagSet("device revoke", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	mailbox := fs.String("mailbox", "", "trusted device mailbox identifier")
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
@@ -656,19 +743,35 @@ func resolveDataDir(mailbox, rootDir, dataDir string) (string, error) {
 
 func runConfig(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl config <show|set-relay|set-relay-token|set-mailbox> [flags]")
+		return fmt.Errorf("usage: pando config <show|set> [flags]")
 	}
 	switch args[0] {
 	case "show":
 		return runConfigShow(args[1:])
-	case "set-relay":
-		return runConfigSetRelay(args[1:])
-	case "set-relay-token":
-		return runConfigSetRelayToken(args[1:])
-	case "set-mailbox":
-		return runConfigSetMailbox(args[1:])
+	case "set":
+		return runConfigSet(args[1:])
+	case "help":
+		return runHelp([]string{"config"})
 	default:
 		return fmt.Errorf("unknown config subcommand %q", args[0])
+	}
+}
+
+func runConfigSet(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox> <value>")
+	}
+	switch args[0] {
+	case "relay":
+		return runConfigSetRelay(args[1:])
+	case "relay-token":
+		return runConfigSetRelayToken(args[1:])
+	case "mailbox":
+		return runConfigSetMailbox(args[1:])
+	case "help":
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox> <value>")
+	default:
+		return fmt.Errorf("unknown config set subcommand %q", args[0])
 	}
 }
 
@@ -691,14 +794,14 @@ func runConfigShow(args []string) error {
 }
 
 func runConfigSetRelay(args []string) error {
-	fs := flag.NewFlagSet("config set-relay", flag.ContinueOnError)
+	fs := flag.NewFlagSet("config set relay", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: pandoctl config set-relay <url>")
+		return fmt.Errorf("usage: pando config set relay <url>")
 	}
 	devCfg, err := config.LoadDeviceConfig(*rootDir)
 	if err != nil {
@@ -713,14 +816,14 @@ func runConfigSetRelay(args []string) error {
 }
 
 func runConfigSetRelayToken(args []string) error {
-	fs := flag.NewFlagSet("config set-relay-token", flag.ContinueOnError)
+	fs := flag.NewFlagSet("config set relay-token", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: pandoctl config set-relay-token <token>")
+		return fmt.Errorf("usage: pando config set relay-token <token>")
 	}
 	devCfg, err := config.LoadDeviceConfig(*rootDir)
 	if err != nil {
@@ -735,14 +838,14 @@ func runConfigSetRelayToken(args []string) error {
 }
 
 func runConfigSetMailbox(args []string) error {
-	fs := flag.NewFlagSet("config set-mailbox", flag.ContinueOnError)
+	fs := flag.NewFlagSet("config set mailbox", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: pandoctl config set-mailbox <mailbox>")
+		return fmt.Errorf("usage: pando config set mailbox <mailbox>")
 	}
 	devCfg, err := config.LoadDeviceConfig(*rootDir)
 	if err != nil {
@@ -852,7 +955,7 @@ func decodeInviteText(text string) (*identity.InviteBundle, error) {
 	if err == nil {
 		return decoded, nil
 	}
-	return nil, fmt.Errorf("decode invite input: %w; try the value after 'invite-code:' or use pandoctl invite-code --raw", err)
+	return nil, fmt.Errorf("decode invite input: %w; try the value after 'invite-code:' or use pando identity invite-code --raw", err)
 }
 
 var inviteCodePattern = regexp.MustCompile(`(?m)invite-code:\s*([A-Za-z0-9_-]+)`)

@@ -208,7 +208,7 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 }
 
 func missingContactError(recipientAccountID string) error {
-	return fmt.Errorf("no contact for account %q; import their invite first with pandoctl add-contact --mailbox <your-mailbox> --paste", recipientAccountID)
+	return fmt.Errorf("no contact for account %q; import their invite first with pando contact add --mailbox <your-mailbox> --paste", recipientAccountID)
 }
 
 func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, error) {

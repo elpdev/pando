@@ -285,7 +285,7 @@ func TestEncryptOutgoingMissingContactSuggestsImportCommand(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected missing contact error")
 	}
-	if !strings.Contains(err.Error(), "pandoctl add-contact --mailbox <your-mailbox> --paste") {
+	if !strings.Contains(err.Error(), "pando contact add --mailbox <your-mailbox> --paste") {
 		t.Fatalf("expected import guidance, got %v", err)
 	}
 }

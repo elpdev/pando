@@ -51,7 +51,6 @@ Pre-built archives for Linux, macOS, and Windows (amd64 and arm64) are available
 ```bash
 go install github.com/elpdev/pando/cmd/pando@latest
 go install github.com/elpdev/pando/cmd/pando-relay@latest
-go install github.com/elpdev/pando/cmd/pandoctl@latest
 ```
 
 ## Run
@@ -65,13 +64,13 @@ pando-relay
 Initialize an identity and exchange contacts:
 
 ```bash
-pandoctl init --mailbox alice
-pandoctl invite-code --mailbox alice --copy
-pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
-pandoctl list-contacts --mailbox alice
+pando identity init --mailbox alice
+pando identity invite-code --mailbox alice --copy
+pando contact add --mailbox alice --code '<bob-invite-code>'
+pando contact list --mailbox alice
 ```
 
-`pandoctl add-contact` now verifies the imported contact automatically. If you want to import without marking the contact trusted yet, use `pandoctl import-contact` and then run `pandoctl verify-contact` later.
+`pando contact add` now verifies the imported contact automatically. If you want to import without marking the contact trusted yet, use `pando contact import` and then run `pando contact verify` later.
 
 ### Fastest way to connect
 
@@ -80,31 +79,31 @@ The easiest invite flows are:
 1. Copy and paste the raw invite code:
 
 ```bash
-pandoctl invite-code --mailbox leo --raw
-pandoctl add-contact --mailbox alice --paste
+pando identity invite-code --mailbox leo --raw
+pando contact add --mailbox alice --paste
 ```
 
 2. Use the clipboard directly:
 
 ```bash
-pandoctl invite-code --mailbox leo --copy
-pandoctl add-contact --mailbox alice --from-clipboard
+pando identity invite-code --mailbox leo --copy
+pando contact add --mailbox alice --from-clipboard
 ```
 
 3. Pipe the invite code between local shells:
 
 ```bash
-pandoctl invite-code --mailbox leo --raw | pandoctl add-contact --mailbox alice --stdin
+pando identity invite-code --mailbox leo --raw | pando contact add --mailbox alice --stdin
 ```
 
 4. Share or scan a QR code in the terminal:
 
 ```bash
-pandoctl invite-code --mailbox leo --qr
-pandoctl add-contact --mailbox alice --qr-image /path/to/invite-qr.png
+pando identity invite-code --mailbox leo --qr
+pando contact add --mailbox alice --qr-image /path/to/invite-qr.png
 ```
 
-`pandoctl add-contact --paste` also accepts the full multiline output from `pandoctl invite-code` and extracts the `invite-code:` value automatically.
+`pando contact add --paste` also accepts the full multiline output from `pando identity invite-code` and extracts the `invite-code:` value automatically.
 
 Start the client:
 
@@ -122,14 +121,14 @@ By default, Pando stores all local data under `~/.pando`:
 You can override the shared storage root with `-root-dir`, which is useful if you want to keep your chats and relay data on a removable drive:
 
 ```bash
-pandoctl init --mailbox alice --root-dir /media/usb/pando
+pando identity init --mailbox alice --root-dir /media/usb/pando
 pando --mailbox alice --to bob --root-dir /media/usb/pando
 pando-relay --root-dir /media/usb/pando
 ```
 
 More specific overrides still win when needed:
 
-- `pando` and `pandoctl`: `-data-dir`
+- `pando`: `-data-dir`
 - `pando-relay`: `-store`
 
 ### Relay configuration

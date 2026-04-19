@@ -14,14 +14,6 @@ builds:
     goos: [linux, darwin, windows]
     goarch: [amd64, arm64]
 
-  - id: pandoctl
-    binary: pandoctl
-    main: ./cmd/pandoctl
-    env: [CGO_ENABLED=0]
-    flags: [-mod=vendor]
-    goos: [linux, darwin, windows]
-    goarch: [amd64, arm64]
-
   - id: pando-relay
     binary: pando-relay
     main: ./cmd/pando-relay
@@ -32,7 +24,7 @@ builds:
 
 archives:
   - id: pando-archive
-    builds: [pando, pandoctl, pando-relay]
+    builds: [pando, pando-relay]
     name_template: "pando_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
@@ -46,7 +38,7 @@ checksum:
 
 nfpms:
   - id: pando-pkg
-    builds: [pando, pandoctl, pando-relay]
+    builds: [pando, pando-relay]
     package_name: pando
     vendor: elpdev
     homepage: https://github.com/elpdev/pando
@@ -72,7 +64,6 @@ brews:
     license: MIT
     install: |
       bin.install "pando"
-      bin.install "pandoctl"
       bin.install "pando-relay"
 
 aurs:
@@ -87,7 +78,6 @@ aurs:
     skip_upload: auto
     package: |-
       install -Dm755 pando       "${pkgdir}/usr/bin/pando"
-      install -Dm755 pandoctl    "${pkgdir}/usr/bin/pandoctl"
       install -Dm755 pando-relay "${pkgdir}/usr/bin/pando-relay"
 
 changelog:
