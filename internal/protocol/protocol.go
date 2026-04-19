@@ -7,11 +7,12 @@ import (
 )
 
 const (
-	MessageTypeSubscribe = "subscribe"
-	MessageTypePublish   = "publish"
-	MessageTypeIncoming  = "incoming"
-	MessageTypeAck       = "ack"
-	MessageTypeError     = "error"
+	MessageTypeSubscribe          = "subscribe"
+	MessageTypeSubscribeChallenge = "subscribe-challenge"
+	MessageTypePublish            = "publish"
+	MessageTypeIncoming           = "incoming"
+	MessageTypeAck                = "ack"
+	MessageTypeError              = "error"
 )
 
 type Envelope struct {
@@ -31,9 +32,16 @@ type Envelope struct {
 }
 
 type SubscribeRequest struct {
-	Mailbox          string `json:"mailbox"`
-	DeviceSigningKey string `json:"device_signing_key,omitempty"`
-	DeviceProof      string `json:"device_proof,omitempty"`
+	Mailbox            string    `json:"mailbox"`
+	DeviceSigningKey   string    `json:"device_signing_key,omitempty"`
+	DeviceProof        string    `json:"device_proof,omitempty"`
+	ChallengeNonce     string    `json:"challenge_nonce,omitempty"`
+	ChallengeExpiresAt time.Time `json:"challenge_expires_at,omitempty"`
+}
+
+type SubscribeChallenge struct {
+	Nonce     string    `json:"nonce"`
+	ExpiresAt time.Time `json:"expires_at"`
 }
 
 type PublishRequest struct {
@@ -49,12 +57,13 @@ type Error struct {
 }
 
 type Message struct {
-	Type      string            `json:"type"`
-	Subscribe *SubscribeRequest `json:"subscribe,omitempty"`
-	Publish   *PublishRequest   `json:"publish,omitempty"`
-	Incoming  *Envelope         `json:"incoming,omitempty"`
-	Ack       *Ack              `json:"ack,omitempty"`
-	Error     *Error            `json:"error,omitempty"`
+	Type      string              `json:"type"`
+	Subscribe *SubscribeRequest   `json:"subscribe,omitempty"`
+	Challenge *SubscribeChallenge `json:"challenge,omitempty"`
+	Publish   *PublishRequest     `json:"publish,omitempty"`
+	Incoming  *Envelope           `json:"incoming,omitempty"`
+	Ack       *Ack                `json:"ack,omitempty"`
+	Error     *Error              `json:"error,omitempty"`
 }
 
 func (m Message) Validate() error {
@@ -71,6 +80,22 @@ func (m Message) Validate() error {
 		}
 		if strings.TrimSpace(m.Subscribe.DeviceProof) == "" {
 			return errors.New("device proof is required")
+		}
+		if strings.TrimSpace(m.Subscribe.ChallengeNonce) == "" {
+			return errors.New("challenge nonce is required")
+		}
+		if m.Subscribe.ChallengeExpiresAt.IsZero() {
+			return errors.New("challenge expiry is required")
+		}
+	case MessageTypeSubscribeChallenge:
+		if m.Challenge == nil {
+			return errors.New("challenge payload is required")
+		}
+		if strings.TrimSpace(m.Challenge.Nonce) == "" {
+			return errors.New("challenge nonce is required")
+		}
+		if m.Challenge.ExpiresAt.IsZero() {
+			return errors.New("challenge expiry is required")
 		}
 	case MessageTypePublish:
 		if m.Publish == nil {
@@ -102,8 +127,8 @@ func (m Message) Validate() error {
 
 }
 
-func SubscribeProofBytes(mailbox string) []byte {
-	return []byte("subscribe\n" + mailbox)
+func SubscribeProofBytes(mailbox, nonce string, expiresAt time.Time) []byte {
+	return []byte("subscribe\n" + mailbox + "\n" + nonce + "\n" + expiresAt.UTC().Format(time.RFC3339Nano))
 }
 
 func ValidateEnvelope(envelope Envelope) error {

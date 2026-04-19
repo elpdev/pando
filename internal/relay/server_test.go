@@ -19,6 +19,7 @@ func TestQueuedMessageDeliveredOnSubscribe(t *testing.T) {
 
 	publisher := dialTestConn(t, server)
 	defer publisher.Close()
+	_ = readChallenge(t, publisher)
 	bobIdentity := mustIdentity(t, "bob")
 
 	writeMessage(t, publisher, protocol.Message{
@@ -33,11 +34,8 @@ func TestQueuedMessageDeliveredOnSubscribe(t *testing.T) {
 
 	subscriber := dialTestConn(t, server)
 	defer subscriber.Close()
-
-	writeMessage(t, subscriber, protocol.Message{
-		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: subscribeRequest(t, bobIdentity),
-	})
+	challenge := readChallenge(t, subscriber)
+	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
 
 	ack := readMessage(t, subscriber)
 	if ack.Type != protocol.MessageTypeAck {
@@ -59,15 +57,13 @@ func TestLiveMessageDeliveredToSubscriber(t *testing.T) {
 	subscriber := dialTestConn(t, server)
 	defer subscriber.Close()
 	bobIdentity := mustIdentity(t, "bob")
-
-	writeMessage(t, subscriber, protocol.Message{
-		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: subscribeRequest(t, bobIdentity),
-	})
+	challenge := readChallenge(t, subscriber)
+	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
 	readMessage(t, subscriber)
 
 	publisher := dialTestConn(t, server)
 	defer publisher.Close()
+	_ = readChallenge(t, publisher)
 
 	writeMessage(t, publisher, protocol.Message{
 		Type: protocol.MessageTypePublish,
@@ -95,15 +91,13 @@ func TestSubscriberPublishAckDoesNotBlockIncomingDelivery(t *testing.T) {
 	defer subscriber.Close()
 	_ = subscriber.SetReadDeadline(time.Now().Add(10 * time.Second))
 	bobIdentity := mustIdentity(t, "bob")
-
-	writeMessage(t, subscriber, protocol.Message{
-		Type:      protocol.MessageTypeSubscribe,
-		Subscribe: subscribeRequest(t, bobIdentity),
-	})
+	challenge := readChallenge(t, subscriber)
+	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
 	readMessage(t, subscriber)
 
 	publisher := dialTestConn(t, server)
 	defer publisher.Close()
+	_ = readChallenge(t, publisher)
 
 	const total = 48
 	done := make(chan error, 1)
@@ -160,7 +154,8 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 
 	first := dialTestConn(t, server)
 	defer first.Close()
-	writeMessage(t, first, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity)})
+	firstChallenge := readChallenge(t, first)
+	writeMessage(t, first, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, firstChallenge)})
 	msg := readMessage(t, first)
 	if msg.Type != protocol.MessageTypeAck {
 		t.Fatalf("expected first subscribe ack, got %q", msg.Type)
@@ -168,17 +163,77 @@ func TestSubscribeRejectsMailboxClaimConflict(t *testing.T) {
 
 	second := dialTestConn(t, server)
 	defer second.Close()
-	writeMessage(t, second, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: &protocol.SubscribeRequest{
-		Mailbox:          "bob",
-		DeviceSigningKey: base64.StdEncoding.EncodeToString(malloryIdentity.Devices[0].SigningPublic),
-		DeviceProof:      base64.StdEncoding.EncodeToString(ed25519.Sign(malloryIdentity.Devices[0].SigningPrivate, protocol.SubscribeProofBytes("bob"))),
-	}})
+	secondChallenge := readChallenge(t, second)
+	writeMessage(t, second, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequestForMailbox(t, malloryIdentity, "bob", secondChallenge)})
 	msg = readMessage(t, second)
 	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
 		t.Fatalf("expected subscribe rejection, got %+v", msg)
 	}
 	if msg.Error.Message != genericClientError {
 		t.Fatalf("expected generic error, got %q", msg.Error.Message)
+	}
+	challengeMsg := readMessage(t, second)
+	if challengeMsg.Type != protocol.MessageTypeSubscribeChallenge || challengeMsg.Challenge == nil {
+		t.Fatalf("expected replacement challenge, got %+v", challengeMsg)
+	}
+}
+
+func TestSubscribeRejectsReplayAcrossConnections(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+
+	first := dialTestConn(t, server)
+	defer first.Close()
+	challenge := readChallenge(t, first)
+	req := subscribeRequest(t, bobIdentity, challenge)
+	writeMessage(t, first, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: req})
+	msg := readMessage(t, first)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected first subscribe ack, got %q", msg.Type)
+	}
+
+	second := dialTestConn(t, server)
+	defer second.Close()
+	_ = readChallenge(t, second)
+	writeMessage(t, second, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: req})
+	msg = readMessage(t, second)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected replay rejection, got %+v", msg)
+	}
+}
+
+func TestSubscribeRejectsExpiredChallenge(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+	conn := dialTestConn(t, server)
+	defer conn.Close()
+	challenge := readChallenge(t, conn)
+	challenge.ExpiresAt = time.Now().UTC().Add(-time.Second)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected expired challenge rejection, got %+v", msg)
+	}
+}
+
+func TestSubscribeRejectsInvalidAttemptWithoutClaimingMailbox(t *testing.T) {
+	server := newTestServer(t)
+	bobIdentity := mustIdentity(t, "bob")
+	conn := dialTestConn(t, server)
+	defer conn.Close()
+	challenge := readChallenge(t, conn)
+	req := subscribeRequest(t, bobIdentity, challenge)
+	req.DeviceProof = base64.StdEncoding.EncodeToString([]byte("bad-proof"))
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: req})
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil {
+		t.Fatalf("expected invalid proof rejection, got %+v", msg)
+	}
+	retryChallenge := readChallenge(t, conn)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, retryChallenge)})
+	msg = readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected mailbox to remain claimable after failed attempt, got %+v", msg)
 	}
 }
 
@@ -234,16 +289,36 @@ func mustIdentity(t *testing.T, mailbox string) *identity.Identity {
 	return id
 }
 
-func subscribeRequest(t *testing.T, id *identity.Identity) *protocol.SubscribeRequest {
+func readChallenge(t *testing.T, conn *websocket.Conn) *protocol.SubscribeChallenge {
+	t.Helper()
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeSubscribeChallenge || msg.Challenge == nil {
+		t.Fatalf("expected subscribe challenge, got %+v", msg)
+	}
+	return msg.Challenge
+}
+
+func subscribeRequest(t *testing.T, id *identity.Identity, challenge *protocol.SubscribeChallenge) *protocol.SubscribeRequest {
+	t.Helper()
+	device, err := id.CurrentDevice()
+	if err != nil {
+		t.Fatalf("current device: %v", err)
+	}
+	return subscribeRequestForMailbox(t, id, device.Mailbox, challenge)
+}
+
+func subscribeRequestForMailbox(t *testing.T, id *identity.Identity, mailbox string, challenge *protocol.SubscribeChallenge) *protocol.SubscribeRequest {
 	t.Helper()
 	device, err := id.CurrentDevice()
 	if err != nil {
 		t.Fatalf("current device: %v", err)
 	}
 	return &protocol.SubscribeRequest{
-		Mailbox:          device.Mailbox,
-		DeviceSigningKey: base64.StdEncoding.EncodeToString(device.SigningPublic),
-		DeviceProof:      base64.StdEncoding.EncodeToString(ed25519.Sign(device.SigningPrivate, protocol.SubscribeProofBytes(device.Mailbox))),
+		Mailbox:            mailbox,
+		DeviceSigningKey:   base64.StdEncoding.EncodeToString(device.SigningPublic),
+		DeviceProof:        base64.StdEncoding.EncodeToString(ed25519.Sign(device.SigningPrivate, protocol.SubscribeProofBytes(mailbox, challenge.Nonce, challenge.ExpiresAt))),
+		ChallengeNonce:     challenge.Nonce,
+		ChallengeExpiresAt: challenge.ExpiresAt,
 	}
 }
 

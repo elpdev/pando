@@ -70,15 +70,26 @@ func (c *Client) Connect(ctx context.Context) error {
 	if previousConn != nil {
 		_ = previousConn.Close()
 	}
+	challenge, err := c.readChallenge(conn)
+	if err != nil {
+		_ = conn.Close()
+		return err
+	}
 
 	if err := c.write(protocol.Message{
 		Type: protocol.MessageTypeSubscribe,
 		Subscribe: &protocol.SubscribeRequest{
-			Mailbox:          c.mailbox,
-			DeviceSigningKey: c.deviceSigningKey(),
-			DeviceProof:      c.deviceProof(),
+			Mailbox:            c.mailbox,
+			DeviceSigningKey:   c.deviceSigningKey(),
+			DeviceProof:        c.deviceProof(challenge),
+			ChallengeNonce:     challenge.Nonce,
+			ChallengeExpiresAt: challenge.ExpiresAt,
 		},
 	}); err != nil {
+		_ = conn.Close()
+		return err
+	}
+	if err := c.readSubscribeAck(conn); err != nil {
 		_ = conn.Close()
 		return err
 	}
@@ -94,11 +105,11 @@ func (c *Client) deviceSigningKey() string {
 	return base64.StdEncoding.EncodeToString(c.device.SigningPublic)
 }
 
-func (c *Client) deviceProof() string {
-	if c.device == nil {
+func (c *Client) deviceProof(challenge *protocol.SubscribeChallenge) string {
+	if c.device == nil || challenge == nil {
 		return ""
 	}
-	return base64.StdEncoding.EncodeToString(ed25519.Sign(c.device.SigningPrivate, protocol.SubscribeProofBytes(c.mailbox)))
+	return base64.StdEncoding.EncodeToString(ed25519.Sign(c.device.SigningPrivate, protocol.SubscribeProofBytes(c.mailbox, challenge.Nonce, challenge.ExpiresAt)))
 }
 
 func (c *Client) Events() <-chan transport.Event {
@@ -173,4 +184,38 @@ func (c *Client) sendEvent(event transport.Event) {
 		_ = recover()
 	}()
 	c.events <- event
+}
+
+func (c *Client) readChallenge(conn *websocket.Conn) (*protocol.SubscribeChallenge, error) {
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	var msg protocol.Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		return nil, err
+	}
+	if msg.Type != protocol.MessageTypeSubscribeChallenge || msg.Challenge == nil {
+		return nil, fmt.Errorf("expected subscribe challenge, got %q", msg.Type)
+	}
+	if err := msg.Validate(); err != nil {
+		return nil, err
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+	return msg.Challenge, nil
+}
+
+func (c *Client) readSubscribeAck(conn *websocket.Conn) error {
+	_ = conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	defer func() {
+		_ = conn.SetReadDeadline(time.Time{})
+	}()
+	var msg protocol.Message
+	if err := conn.ReadJSON(&msg); err != nil {
+		return err
+	}
+	if msg.Type == protocol.MessageTypeError && msg.Error != nil {
+		return errors.New(msg.Error.Message)
+	}
+	if msg.Type != protocol.MessageTypeAck || msg.Ack == nil {
+		return fmt.Errorf("expected subscribe ack, got %q", msg.Type)
+	}
+	return nil
 }

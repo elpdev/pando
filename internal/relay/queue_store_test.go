@@ -2,6 +2,7 @@ package relay
 
 import (
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/elpdev/pando/internal/protocol"
@@ -60,8 +61,8 @@ func TestBoltQueueStorePersistsMailboxClaims(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new bolt queue store: %v", err)
 	}
-	if err := store.ClaimMailbox("bob", []byte("pubkey-1")); err != nil {
-		t.Fatalf("claim mailbox: %v", err)
+	if err := store.AuthorizeMailbox("bob", []byte("pubkey-1")); err != nil {
+		t.Fatalf("authorize mailbox: %v", err)
 	}
 	if err := store.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
@@ -72,14 +73,41 @@ func TestBoltQueueStorePersistsMailboxClaims(t *testing.T) {
 		t.Fatalf("reopen bolt queue store: %v", err)
 	}
 	defer reopened.Close()
-	owner, err := reopened.MailboxOwner("bob")
-	if err != nil {
-		t.Fatalf("mailbox owner: %v", err)
+	if err := reopened.AuthorizeMailbox("bob", []byte("pubkey-1")); err != nil {
+		t.Fatalf("expected persisted owner to reauthorize, got %v", err)
 	}
-	if string(owner) != "pubkey-1" {
-		t.Fatalf("expected persisted owner, got %q", string(owner))
-	}
-	if err := reopened.ClaimMailbox("bob", []byte("pubkey-2")); err != ErrMailboxClaimConflict {
+	if err := reopened.AuthorizeMailbox("bob", []byte("pubkey-2")); err != ErrMailboxClaimConflict {
 		t.Fatalf("expected mailbox claim conflict, got %v", err)
+	}
+}
+
+func TestMemoryQueueStoreAuthorizeMailboxIsAtomic(t *testing.T) {
+	store := NewMemoryQueueStore()
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	keys := [][]byte{[]byte("pubkey-1"), []byte("pubkey-2")}
+	for _, key := range keys {
+		wg.Add(1)
+		go func(key []byte) {
+			defer wg.Done()
+			errs <- store.AuthorizeMailbox("bob", key)
+		}(key)
+	}
+	wg.Wait()
+	close(errs)
+	allowed := 0
+	conflicts := 0
+	for err := range errs {
+		switch err {
+		case nil:
+			allowed++
+		case ErrMailboxClaimConflict:
+			conflicts++
+		default:
+			t.Fatalf("unexpected authorization result: %v", err)
+		}
+	}
+	if allowed != 1 || conflicts != 1 {
+		t.Fatalf("expected one winner and one conflict, got allowed=%d conflicts=%d", allowed, conflicts)
 	}
 }

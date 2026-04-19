@@ -23,8 +23,7 @@ var ErrMailboxClaimConflict = errors.New("mailbox is already claimed by a differ
 type QueueStore interface {
 	Enqueue(protocol.Envelope) error
 	Drain(mailbox string) ([]protocol.Envelope, error)
-	ClaimMailbox(mailbox string, signingPublic []byte) error
-	MailboxOwner(mailbox string) ([]byte, error)
+	AuthorizeMailbox(mailbox string, signingPublic []byte) error
 	Close() error
 }
 
@@ -68,7 +67,7 @@ func (s *MemoryQueueStore) Close() error {
 	return nil
 }
 
-func (s *MemoryQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) error {
+func (s *MemoryQueueStore) AuthorizeMailbox(mailbox string, signingPublic []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing := s.claims[mailbox]
@@ -80,16 +79,6 @@ func (s *MemoryQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) er
 		return nil
 	}
 	return ErrMailboxClaimConflict
-}
-
-func (s *MemoryQueueStore) MailboxOwner(mailbox string) ([]byte, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	owner := s.claims[mailbox]
-	if len(owner) == 0 {
-		return nil, nil
-	}
-	return append([]byte(nil), owner...), nil
 }
 
 type BoltQueueStore struct {
@@ -170,7 +159,7 @@ func (s *BoltQueueStore) Drain(mailbox string) ([]protocol.Envelope, error) {
 	return backlog, nil
 }
 
-func (s *BoltQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) error {
+func (s *BoltQueueStore) AuthorizeMailbox(mailbox string, signingPublic []byte) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(mailboxClaimBucket)
 		key := []byte(mailbox)
@@ -183,22 +172,6 @@ func (s *BoltQueueStore) ClaimMailbox(mailbox string, signingPublic []byte) erro
 		}
 		return ErrMailboxClaimConflict
 	})
-}
-
-func (s *BoltQueueStore) MailboxOwner(mailbox string) ([]byte, error) {
-	var owner []byte
-	err := s.db.View(func(tx *bbolt.Tx) error {
-		bucket := tx.Bucket(mailboxClaimBucket)
-		owner = append([]byte(nil), bucket.Get([]byte(mailbox))...)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	if len(owner) == 0 {
-		return nil, nil
-	}
-	return owner, nil
 }
 
 func (s *BoltQueueStore) Close() error {

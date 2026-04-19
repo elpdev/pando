@@ -15,7 +15,6 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/store"
-	"github.com/elpdev/pando/internal/transport"
 	wsclient "github.com/elpdev/pando/internal/transport/ws"
 	"net/http/httptest"
 )
@@ -395,13 +394,11 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
-	awaitSubscribeAck(t, aliceClient.Events())
 	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)
 	}
-	awaitSubscribeAck(t, bobClient.Events())
 
 	batch, _, err := bobService.PreparePhotoOutgoing("alice", photoPath)
 	if err != nil {
@@ -631,13 +628,11 @@ func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
-	awaitSubscribeAck(t, aliceClient.Events())
 	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)
 	}
-	awaitSubscribeAck(t, bobClient.Events())
 
 	sendPhotoAndAwaitReceipt(t, aliceClient, aliceService, bobClient, bobService, "bob", alicePhotoPath)
 	sendPhotoAndAwaitReceipt(t, bobClient, bobService, aliceClient, aliceService, "alice", bobPhotoPath)
@@ -719,21 +714,6 @@ func mustM4ABytes() []byte {
 		0x00, 0x00, 0x00, 0x00,
 		'M', '4', 'A', ' ',
 		'i', 's', 'o', 'm',
-	}
-}
-
-func awaitSubscribeAck(t *testing.T, events <-chan transport.Event) {
-	t.Helper()
-	select {
-	case event := <-events:
-		if event.Err != nil {
-			t.Fatalf("unexpected event error: %v", event.Err)
-		}
-		if event.Message == nil || event.Message.Type != protocol.MessageTypeAck {
-			t.Fatalf("expected subscribe ack, got %+v", event.Message)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for subscribe ack")
 	}
 }
 

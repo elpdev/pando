@@ -53,7 +53,6 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	if err := alice.Connect(ctx); err != nil {
 		t.Fatalf("connect alice: %v", err)
 	}
-	awaitAck(t, alice.Events())
 
 	bobID, err := identity.New("bob")
 	if err != nil {
@@ -64,7 +63,6 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	if err := bob.Connect(ctx); err != nil {
 		t.Fatalf("connect bob: %v", err)
 	}
-	awaitAck(t, bob.Events())
 
 	const total = 60
 	for i := 0; i < total; i++ {
@@ -102,21 +100,6 @@ func TestClientReceivesLargeBurstWhileSendingResponses(t *testing.T) {
 	}
 	if received != total || acked != total {
 		t.Fatalf("expected %d messages and acks, got received=%d acked=%d", total, received, acked)
-	}
-}
-
-func awaitAck(t *testing.T, events <-chan transport.Event) {
-	t.Helper()
-	select {
-	case event := <-events:
-		if event.Err != nil {
-			t.Fatalf("unexpected event error: %v", event.Err)
-		}
-		if event.Message == nil || event.Message.Type != protocol.MessageTypeAck {
-			t.Fatalf("expected subscribe ack, got %+v", event.Message)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for subscribe ack")
 	}
 }
 

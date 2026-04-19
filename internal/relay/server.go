@@ -1,7 +1,6 @@
 package relay
 
 import (
-	"bytes"
 	"context"
 	"crypto/ed25519"
 	_ "embed"
@@ -49,6 +48,7 @@ type subscriber struct {
 }
 
 const genericClientError = "request rejected"
+const subscribeChallengeTTL = 30 * time.Second
 
 func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if queue == nil {
@@ -128,6 +128,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer conn.Close()
+	challenge := newSubscribeChallenge(time.Now().UTC())
+	s.writeConn(nil, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: challenge})
 
 	var current *subscriber
 	for {
@@ -153,11 +155,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				s.writeClientError(current, conn, "relay rate limit exceeded")
 				continue
 			}
-			if err := s.verifySubscribeRequest(*msg.Subscribe); err != nil {
+			if err := s.verifySubscribeRequest(*msg.Subscribe, challenge, now); err != nil {
 				s.logger.Warn("reject subscribe request", "mailbox", msg.Subscribe.Mailbox, "error", err)
 				s.writeClientError(current, conn, genericClientError)
+				challenge = newSubscribeChallenge(now)
+				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: challenge})
 				continue
 			}
+			challenge = nil
 			if current != nil {
 				s.unregister(current)
 			}
@@ -208,7 +213,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) verifySubscribeRequest(req protocol.SubscribeRequest) error {
+func (s *Server) verifySubscribeRequest(req protocol.SubscribeRequest, challenge *protocol.SubscribeChallenge, now time.Time) error {
+	if challenge == nil {
+		return fmt.Errorf("subscribe challenge is required")
+	}
+	if req.ChallengeNonce != challenge.Nonce {
+		return fmt.Errorf("invalid challenge nonce")
+	}
+	if !req.ChallengeExpiresAt.Equal(challenge.ExpiresAt) {
+		return fmt.Errorf("invalid challenge expiry")
+	}
+	if !challenge.ExpiresAt.After(now) {
+		return fmt.Errorf("subscribe challenge expired")
+	}
 	signingPublic, err := base64.StdEncoding.DecodeString(req.DeviceSigningKey)
 	if err != nil {
 		return fmt.Errorf("decode device signing key: %w", err)
@@ -220,20 +237,17 @@ func (s *Server) verifySubscribeRequest(req protocol.SubscribeRequest) error {
 	if err != nil {
 		return fmt.Errorf("decode device proof: %w", err)
 	}
-	if !ed25519.Verify(ed25519.PublicKey(signingPublic), protocol.SubscribeProofBytes(req.Mailbox), proof) {
+	if !ed25519.Verify(ed25519.PublicKey(signingPublic), protocol.SubscribeProofBytes(req.Mailbox, req.ChallengeNonce, req.ChallengeExpiresAt), proof) {
 		return fmt.Errorf("invalid device proof")
 	}
-	owner, err := s.queue.MailboxOwner(req.Mailbox)
-	if err != nil {
-		return fmt.Errorf("load mailbox owner: %w", err)
-	}
-	if len(owner) != 0 && !bytes.Equal(owner, signingPublic) {
-		return ErrMailboxClaimConflict
-	}
-	if err := s.queue.ClaimMailbox(req.Mailbox, signingPublic); err != nil {
+	if err := s.queue.AuthorizeMailbox(req.Mailbox, signingPublic); err != nil {
 		return err
 	}
 	return nil
+}
+
+func newSubscribeChallenge(now time.Time) *protocol.SubscribeChallenge {
+	return &protocol.SubscribeChallenge{Nonce: uuid.NewString(), ExpiresAt: now.Add(subscribeChallengeTTL)}
 }
 
 func (s *Server) register(sub *subscriber) ([]protocol.Envelope, error) {
