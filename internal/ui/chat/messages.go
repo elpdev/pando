@@ -14,9 +14,7 @@ import (
 func (m *Model) handleProtocolMessage(msg protocol.Message) {
 	switch msg.Type {
 	case protocol.MessageTypeAck:
-		if m.connecting {
-			m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
-		}
+		m.handleIncomingAck()
 	case protocol.MessageTypeIncoming:
 		if msg.Incoming == nil {
 			return
@@ -29,95 +27,111 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 		if result == nil || result.Duplicate {
 			return
 		}
-		if len(result.AckEnvelopes) != 0 {
-			for _, envelope := range result.AckEnvelopes {
-				if err := m.client.Send(envelope); err != nil {
-					m.pushToast(fmt.Sprintf("delivery ack failed: %v", err), ToastBad)
-					break
-				}
+		for _, envelope := range result.AckEnvelopes {
+			if err := m.client.Send(envelope); err != nil {
+				m.pushToast(fmt.Sprintf("delivery ack failed: %v", err), ToastBad)
+				break
 			}
 		}
 		if result.ContactUpdated != nil {
 			m.upsertContact(result.ContactUpdated)
-			if result.ContactUpdated.AccountID == m.recipientMailbox {
+			if result.ContactUpdated.AccountID == m.peer.mailbox {
 				m.syncRecipientDetails()
 				m.pushToast(fmt.Sprintf("updated device bundle for %s", result.ContactUpdated.AccountID), ToastInfo)
 			}
 			return
 		}
 		if result.Control {
-			if result.TypingState != "" {
-				if result.PeerAccountID == m.recipientMailbox {
-					if result.TypingState == messaging.TypingStateActive {
-						m.typing.peerVisible = true
-						m.typing.peerExpiresAt = result.TypingExpiresAt
-						m.typing.spinner = newTypingSpinner()
-					} else {
-						m.clearPeerTyping()
-					}
-				}
-				return
-			}
-			if result.MessageID != "" {
-				if result.PeerAccountID == m.recipientMailbox {
-					if !m.updateMessageStatus(result.MessageID, statusDelivered) {
-						m.loadHistory()
-					}
-					m.syncViewport()
-				}
-			}
+			m.handleIncomingControl(result)
 			return
 		}
-		if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, msg.Incoming.Timestamp); err != nil {
-			m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
-			return
-		}
-		if result.PeerAccountID == m.recipientMailbox {
-			m.clearPeerTyping()
-			m.appendMessageItem(messageItem{
-				direction:    "inbound",
-				sender:       msg.Incoming.SenderMailbox,
-				body:         result.Body,
-				timestamp:    msg.Incoming.Timestamp,
-				messageID:    result.MessageID,
-				isAttachment: attachmentBodyPattern(result.Body),
-			})
-			m.syncViewport()
-			return
-		}
-		m.markUnread(result.PeerAccountID)
-		m.pushToast(fmt.Sprintf("new message from %s", result.PeerAccountID), ToastInfo)
+		m.handleIncomingChat(result, *msg.Incoming)
 	case protocol.MessageTypeError:
-		if msg.Error != nil {
-			m.pushToast(fmt.Sprintf("relay error: %s", msg.Error.Message), ToastBad)
+		m.handleIncomingError(msg.Error)
+	}
+}
+
+func (m *Model) handleIncomingAck() {
+	if m.conn.connecting {
+		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
+	}
+}
+
+func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope protocol.Envelope) {
+	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp); err != nil {
+		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
+		return
+	}
+	if result.PeerAccountID == m.peer.mailbox {
+		m.clearPeerTyping()
+		m.appendMessageItem(messageItem{
+			direction:    "inbound",
+			sender:       envelope.SenderMailbox,
+			body:         result.Body,
+			timestamp:    envelope.Timestamp,
+			messageID:    result.MessageID,
+			isAttachment: attachmentBodyPattern(result.Body),
+		})
+		m.syncViewport()
+		return
+	}
+	m.markUnread(result.PeerAccountID)
+	m.pushToast(fmt.Sprintf("new message from %s", result.PeerAccountID), ToastInfo)
+}
+
+func (m *Model) handleIncomingControl(result *messaging.IncomingResult) {
+	if result.TypingState != "" {
+		if result.PeerAccountID != m.peer.mailbox {
+			return
 		}
+		if result.TypingState == messaging.TypingStateActive {
+			m.typing.peerVisible = true
+			m.typing.peerExpiresAt = result.TypingExpiresAt
+			m.typing.spinner = newTypingSpinner()
+			return
+		}
+		m.clearPeerTyping()
+		return
+	}
+	if result.MessageID == "" || result.PeerAccountID != m.peer.mailbox {
+		return
+	}
+	if !m.updateMessageStatus(result.MessageID, statusDelivered) {
+		m.loadHistory()
+	}
+	m.syncViewport()
+}
+
+func (m *Model) handleIncomingError(msg *protocol.Error) {
+	if msg != nil {
+		m.pushToast(fmt.Sprintf("relay error: %s", msg.Message), ToastBad)
 	}
 }
 
 func (m *Model) appendMessageItem(item messageItem) {
 	wasAtBottom := m.viewport.AtBottom()
-	m.messageItems = append(m.messageItems, item)
+	m.msgs.items = append(m.msgs.items, item)
 	m.renderMessages()
 	if item.direction == "inbound" && !wasAtBottom {
-		m.pendingIncoming++
+		m.msgs.pendingIncoming++
 	}
 }
 
 func (m *Model) renderMessages() {
 	const groupGap = 5 * time.Minute
-	m.messages = m.messages[:0]
+	m.msgs.rendered = m.msgs.rendered[:0]
 
 	var prevSender string
 	var prevTS time.Time
-	for i, item := range m.messageItems {
+	for i, item := range m.msgs.items {
 		startGroup := i == 0 || item.sender != prevSender || item.timestamp.Sub(prevTS) > groupGap
 		if startGroup {
 			if i > 0 {
-				m.messages = append(m.messages, "")
+				m.msgs.rendered = append(m.msgs.rendered, "")
 			}
-			m.messages = append(m.messages, m.renderGroupHeader(item))
+			m.msgs.rendered = append(m.msgs.rendered, m.renderGroupHeader(item))
 		}
-		m.messages = append(m.messages, m.renderMessageBody(item))
+		m.msgs.rendered = append(m.msgs.rendered, m.renderMessageBody(item))
 		prevSender = item.sender
 		prevTS = item.timestamp
 	}
@@ -129,7 +143,7 @@ func (m *Model) renderGroupHeader(item messageItem) string {
 	if item.direction == "outbound" {
 		nameStyled = style.Bold.Render("you")
 	} else {
-		nameStyled = style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(name)
+		nameStyled = style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(name)
 	}
 	ts := ""
 	if !item.timestamp.IsZero() {
@@ -176,14 +190,14 @@ func (m *Model) updateMessageStatus(messageID string, status deliveryStatus) boo
 	if messageID == "" {
 		return false
 	}
-	for i := range m.messageItems {
-		if m.messageItems[i].direction != "outbound" || m.messageItems[i].messageID != messageID {
+	for i := range m.msgs.items {
+		if m.msgs.items[i].direction != "outbound" || m.msgs.items[i].messageID != messageID {
 			continue
 		}
-		if m.messageItems[i].status == status {
+		if m.msgs.items[i].status == status {
 			return true
 		}
-		m.messageItems[i].status = status
+		m.msgs.items[i].status = status
 		m.renderMessages()
 		return true
 	}

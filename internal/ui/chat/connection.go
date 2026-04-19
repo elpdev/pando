@@ -10,7 +10,7 @@ import (
 )
 
 func (m *Model) connectCmd() tea.Cmd {
-	m.connecting = true
+	m.conn.connecting = true
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -22,16 +22,16 @@ func (m *Model) connectCmd() tea.Cmd {
 }
 
 func (m *Model) reconnectCmd() tea.Cmd {
-	attempt := m.reconnectAttempt + 1
-	m.reconnectAttempt = attempt
+	attempt := m.conn.reconnectAttempt + 1
+	m.conn.reconnectAttempt = attempt
 	shift := attempt - 1
 	if shift > 4 {
 		shift = 4
 	}
 	delay := time.Second * time.Duration(1<<shift)
-	m.connecting = true
-	m.reconnectDelay = delay
-	m.status = fmt.Sprintf("reconnecting in %s", delay)
+	m.conn.connecting = true
+	m.conn.reconnectDelay = delay
+	m.conn.status = fmt.Sprintf("reconnecting in %s", delay)
 	return func() tea.Msg {
 		time.Sleep(delay)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -54,25 +54,25 @@ func (m *Model) waitForEvent() tea.Cmd {
 }
 
 func (m *Model) handleAuthFailure(err error) {
-	m.connecting = false
-	m.connected = false
-	m.disconnected = true
-	m.authFailed = true
-	m.status = fmt.Sprintf("relay auth failed: %v", err)
+	m.conn.connecting = false
+	m.conn.connected = false
+	m.conn.disconnected = true
+	m.conn.authFailed = true
+	m.conn.status = fmt.Sprintf("relay auth failed: %v", err)
 	m.clearPeerTyping()
 	m.resetLocalTypingState()
 	m.syncInputPlaceholder()
 }
 
 func (m *Model) markConnected(status string) {
-	m.connecting = false
-	m.connected = true
-	m.authFailed = false
-	m.disconnected = false
-	m.reconnectAttempt = 0
-	m.reconnectDelay = 0
+	m.conn.connecting = false
+	m.conn.connected = true
+	m.conn.authFailed = false
+	m.conn.disconnected = false
+	m.conn.reconnectAttempt = 0
+	m.conn.reconnectDelay = 0
 	m.syncInputPlaceholder()
-	m.status = status
+	m.conn.status = status
 }
 
 func (m *Model) handleConnectionError(err error) tea.Cmd {
@@ -80,9 +80,9 @@ func (m *Model) handleConnectionError(err error) tea.Cmd {
 		m.handleAuthFailure(err)
 		return nil
 	}
-	m.status = fmt.Sprintf("disconnected: %v", err)
-	m.disconnected = true
-	m.connected = false
+	m.conn.status = fmt.Sprintf("disconnected: %v", err)
+	m.conn.disconnected = true
+	m.conn.connected = false
 	m.resetLocalTypingState()
 	return m.reconnectCmd()
 }

@@ -16,42 +16,28 @@ import (
 )
 
 type Model struct {
-	client             transport.Client
-	messaging          *messaging.Service
-	mailbox            string
-	recipientMailbox   string
-	relayURL           string
-	relayToken         string
-	relayClient        RelayClient
-	relayClientFactory func(url, token string) (RelayClient, error)
-	input              textinput.Model
-	viewport           viewport.Model
-	contacts           []contactItem
-	selectedIndex      int
-	messageItems       []messageItem
-	messages           []string
-	status             string
-	connecting         bool
-	disconnected       bool
-	connected          bool
-	authFailed         bool
-	reconnectAttempt   int
-	reconnectDelay     time.Duration
-	peerFingerprint    string
-	peerVerified       bool
-	peerTrustSource    string
-	typing             typingState
-	filePicker         filePickerState
-	addContact         addContactModal
-	helpOpen           bool
-	peerDetailOpen     bool
-	focus              focusState
-	pendingIncoming    int
-	unread             map[string]int
-	toast              *toastState
-	width              int
-	height             int
-	sidebarWidth       int
+	client    transport.Client
+	messaging *messaging.Service
+	mailbox   string
+
+	relay  relayState
+	peer   peerState
+	conn   connectionState
+	msgs   messageState
+	typing typingState
+	ui     uiState
+
+	input    textinput.Model
+	viewport viewport.Model
+
+	contacts      []contactItem
+	selectedIndex int
+
+	filePicker     filePickerModel
+	addContact     addContactModal
+	helpOpen       bool
+	peerDetailOpen bool
+	unread         map[string]int
 }
 
 func New(deps Deps) *Model {
@@ -68,21 +54,25 @@ func New(deps Deps) *Model {
 		factory = defaultRelayClientFactory
 	}
 	m := &Model{
-		client:             deps.Client,
-		messaging:          deps.Messaging,
-		mailbox:            deps.Mailbox,
-		recipientMailbox:   deps.RecipientMailbox,
-		relayURL:           deps.RelayURL,
-		relayToken:         deps.RelayToken,
-		relayClientFactory: factory,
-		input:              input,
-		viewport:           vp,
-		typing:             typingState{spinner: newTypingSpinner()},
-		status:             fmt.Sprintf("connecting as %s", deps.Mailbox),
-		connecting:         true,
-		selectedIndex:      -1,
-		filePicker:         filePickerState{dir: defaultFilePickerDir()},
-		unread:             map[string]int{},
+		client:    deps.Client,
+		messaging: deps.Messaging,
+		mailbox:   deps.Mailbox,
+		relay: relayState{
+			url:           deps.RelayURL,
+			token:         deps.RelayToken,
+			clientFactory: factory,
+		},
+		peer: peerState{mailbox: deps.RecipientMailbox},
+		conn: connectionState{
+			status:     fmt.Sprintf("connecting as %s", deps.Mailbox),
+			connecting: true,
+		},
+		typing:        typingState{spinner: newTypingSpinner()},
+		input:         input,
+		viewport:      vp,
+		selectedIndex: -1,
+		filePicker:    newFilePickerModel(),
+		unread:        map[string]int{},
 	}
 	m.addContact = newAddContactModal(addContactDeps{
 		messaging:         deps.Messaging,
@@ -92,6 +82,7 @@ func New(deps Deps) *Model {
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
+	m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
 	return m
 }
 
@@ -103,17 +94,17 @@ func defaultRelayClientFactory(url, token string) (RelayClient, error) {
 // relay URL is configured — callers should gate relay-dependent flows before
 // reaching this point.
 func (m *Model) ensureRelayClient() (RelayClient, error) {
-	if m.relayClient != nil {
-		return m.relayClient, nil
+	if m.relay.client != nil {
+		return m.relay.client, nil
 	}
-	if strings.TrimSpace(m.relayURL) == "" {
+	if strings.TrimSpace(m.relay.url) == "" {
 		return nil, fmt.Errorf("no relay configured")
 	}
-	client, err := m.relayClientFactory(m.relayURL, m.relayToken)
+	client, err := m.relay.clientFactory(m.relay.url, m.relay.token)
 	if err != nil {
 		return nil, err
 	}
-	m.relayClient = client
+	m.relay.client = client
 	return client, nil
 }
 
@@ -123,14 +114,14 @@ func (m *Model) Init() tea.Cmd {
 }
 
 func (m *Model) SetSize(width, height int) {
-	m.width = width
-	m.height = height
+	m.ui.width = width
+	m.ui.height = height
 	m.updateLayout()
 	m.syncViewport()
 }
 
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
-	if handled, cmd := m.updateAddContact(msg); handled {
+	if handled, cmd := m.handleOverlays(msg); handled {
 		return m, cmd
 	}
 
@@ -143,6 +134,14 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:
 		return m.handleAddContactClosedMsg(msg)
+	case filePickerClosedMsg:
+		m.closeFilePicker()
+		return m, nil
+	case filePickerErrorMsg:
+		m.pushToast(fmt.Sprintf("file picker failed: %v", msg.err), ToastBad)
+		return m, nil
+	case filePickerSelectedMsg:
+		return m, m.sendAttachment(msg.path, messaging.AttachmentTypeFile)
 	case clientEventMsg:
 		return m.handleClientEventMsg(msg)
 	case connectResultMsg:
@@ -186,7 +185,7 @@ func parseAttachmentPath(path string) string {
 // Ephemeral feedback (send failures, contact imports, etc.) goes through the
 // toast slot instead, see Toast().
 func (m *Model) Status() string {
-	return m.status
+	return m.conn.status
 }
 
 // ConnectionState returns the coarse connection state. The App header uses
@@ -194,15 +193,15 @@ func (m *Model) Status() string {
 // detail text when one is useful.
 func (m *Model) ConnectionState() ConnState {
 	switch {
-	case m.authFailed:
+	case m.conn.authFailed:
 		return ConnAuthFailed
-	case m.disconnected:
+	case m.conn.disconnected:
 		return ConnDisconnected
-	case m.connecting && m.reconnectAttempt > 0:
+	case m.conn.connecting && m.conn.reconnectAttempt > 0:
 		return ConnReconnecting
-	case m.connecting:
+	case m.conn.connecting:
 		return ConnConnecting
-	case m.connected:
+	case m.conn.connected:
 		return ConnConnected
 	default:
 		return ConnConnecting
@@ -216,7 +215,7 @@ func (m *Model) ReconnectDelay() time.Duration {
 	if m.ConnectionState() != ConnReconnecting {
 		return 0
 	}
-	return m.reconnectDelay
+	return m.conn.reconnectDelay
 }
 
 func (m *Model) Mailbox() string {
@@ -224,34 +223,34 @@ func (m *Model) Mailbox() string {
 }
 
 func (m *Model) RecipientMailbox() string {
-	return m.recipientMailbox
+	return m.peer.mailbox
 }
 
 func (m *Model) PeerFingerprint() string {
-	return m.peerFingerprint
+	return m.peer.fingerprint
 }
 
 func (m *Model) PeerVerified() bool {
-	return m.peerVerified
+	return m.peer.verified
 }
 
 // Toast returns the current ephemeral message and its level, or empty string
 // if no toast is active.
 func (m *Model) Toast() (string, ToastLevel) {
-	if m.toast == nil {
+	if m.ui.toast == nil {
 		return "", ToastInfo
 	}
-	return m.toast.text, m.toast.level
+	return m.ui.toast.text, m.ui.toast.level
 }
 
 // pushToast posts an ephemeral message to the toast slot. The message
 // persists for toastLifetime; after that the next typing tick clears it.
 func (m *Model) pushToast(text string, level ToastLevel) {
 	if text == "" {
-		m.toast = nil
+		m.ui.toast = nil
 		return
 	}
-	m.toast = &toastState{
+	m.ui.toast = &toastState{
 		text:      text,
 		level:     level,
 		expiresAt: time.Now().Add(toastLifetime),
@@ -260,6 +259,46 @@ func (m *Model) pushToast(text string, level ToastLevel) {
 
 func (m *Model) Close() error {
 	return m.client.Close()
+}
+
+func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
+	if m.addContact.open {
+		if handled, cmd := m.addContact.Update(msg); handled {
+			return true, cmd
+		}
+	}
+
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
+	}
+	if m.helpOpen {
+		return true, m.handleHelpKey(keyMsg)
+	}
+	if m.filePicker.open {
+		var cmd tea.Cmd
+		m.filePicker, cmd = m.filePicker.Update(msg)
+		if cmd == nil {
+			return true, nil
+		}
+		switch next := cmd().(type) {
+		case filePickerClosedMsg:
+			m.closeFilePicker()
+			return true, nil
+		case filePickerErrorMsg:
+			m.pushToast(fmt.Sprintf("file picker failed: %v", next.err), ToastBad)
+			return true, nil
+		case filePickerSelectedMsg:
+			m.closeFilePicker()
+			return true, m.sendAttachment(next.path, messaging.AttachmentTypeFile)
+		default:
+			return true, func() tea.Msg { return next }
+		}
+	}
+	if m.peerDetailOpen {
+		return true, m.handlePeerDetailKey(keyMsg)
+	}
+	return false, nil
 }
 
 func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) tea.Cmd {
@@ -279,27 +318,34 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 // handleHelpKey closes the help overlay on ?, esc, q, or ctrl+c. Every other
 // key is absorbed so the chat input doesn't receive keystrokes meant to
 // dismiss the overlay.
-func (m *Model) handleHelpKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
+func (m *Model) handleHelpKey(msg tea.KeyMsg) tea.Cmd {
 	switch {
 	case msg.Type == tea.KeyEsc:
 		m.helpOpen = false
 	case msg.Type == tea.KeyCtrlC:
 		m.helpOpen = false
-		return m, tea.Quit
+		return tea.Quit
 	case msg.Type == tea.KeyRunes && (string(msg.Runes) == "?" || string(msg.Runes) == "q"):
 		m.helpOpen = false
 	}
-	return m, nil
+	return nil
+}
+
+func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
+	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlP {
+		m.peerDetailOpen = false
+	}
+	return nil
 }
 
 // toggleFocus flips which pane owns keyboard input. In wide mode this mostly
 // affects the border color; in narrow mode it switches which pane is rendered.
 func (m *Model) toggleFocus() {
-	if m.focus == focusChat {
-		m.focus = focusSidebar
+	if m.ui.focus == focusChat {
+		m.ui.focus = focusSidebar
 		m.input.Blur()
 	} else {
-		m.focus = focusChat
+		m.ui.focus = focusChat
 		m.input.Focus()
 	}
 }
@@ -308,7 +354,7 @@ func (m *Model) toggleFocus() {
 // incoming-message counter that feeds the "↓ N new" pill.
 func (m *Model) jumpToLatest() {
 	m.viewport.GotoBottom()
-	m.pendingIncoming = 0
+	m.msgs.pendingIncoming = 0
 }
 
 func (m *Model) upsertContact(contact *identity.Contact) {
@@ -349,7 +395,7 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 		m.pushToast(fmt.Sprintf("usage: %s <path>", prefix), ToastWarn)
 		return m, nil
 	}
-	batch, displayBody, err := prepare(m.recipientMailbox, path)
+	batch, displayBody, err := prepare(m.peer.mailbox, path)
 	if err != nil {
 		m.pushToast(err.Error(), ToastBad)
 		return m, nil
@@ -366,5 +412,5 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 	m.input.SetValue("")
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
-	return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
+	return m, m.sendCmd(m.peer.mailbox, displayBody, batch)
 }
