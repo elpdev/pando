@@ -4,11 +4,10 @@ Guidelines for AI agents working in the Pando codebase.
 
 ## Project Overview
 
-Pando is a terminal-native encrypted chat system in Go with three binaries:
+Pando is a terminal-native encrypted chat system in Go with two binaries:
 
-- `pando` — Bubble Tea TUI chat client
+- `pando` — Bubble Tea TUI chat client and CLI for identity, contact, and device management
 - `pando-relay` — WebSocket relay server with durable mailbox queues
-- `pandoctl` — CLI for identity, contact, and device management
 
 ## Essential Commands
 
@@ -23,12 +22,11 @@ go run ./cmd/pando-relay
 go run ./cmd/pando --mailbox alice --to bob
 
 # Run the management CLI
-go run ./cmd/pandoctl init --mailbox alice
+go run ./cmd/pando identity init --mailbox alice
 
 # Build all binaries (used in CI)
 CGO_ENABLED=0 go build -mod=vendor -o pando ./cmd/pando
 CGO_ENABLED=0 go build -mod=vendor -o pando-relay ./cmd/pando-relay
-CGO_ENABLED=0 go build -mod=vendor -o pandoctl ./cmd/pandoctl
 
 # Docker build (uses vendored deps, no network fetch)
 docker build -t pando-relay .
@@ -38,9 +36,8 @@ docker build -t pando-relay .
 
 ```
 cmd/                    thin main.go wrappers; all logic lives in internal/
-  pando/                TUI client entrypoint → internal/clientcmd
+  pando/                TUI client + CLI entrypoint → internal/clientcmd / internal/ctlcmd
   pando-relay/          relay entrypoint → internal/relaycmd
-  pandoctl/             CLI entrypoint → internal/ctlcmd
 
 internal/
   clientcmd/            flag parsing, store init, wire chat model + WS client
@@ -120,8 +117,8 @@ Defaults: Relay URL `ws://localhost:8080/ws`, data dir auto-computed from mailbo
 
 ### Relay
 
-Flags: `-addr`, `-store`, `-ttl`, `-max-message-bytes`, `-rate-limit-per-minute`, `-auth-token`
-Env vars (prefixed `PANDO_RELAY_`): `ADDR`, `STORE_PATH`, `AUTH_TOKEN`, `QUEUE_TTL`, `MAX_MESSAGE_BYTES`, `RATE_LIMIT_PER_MINUTE`
+Flags: `-addr`, `-store`, `-ttl`, `-max-message-bytes`, `-max-queued-messages`, `-max-queued-bytes`, `-rate-limit-per-minute`, `-auth-token`, `-landing-page`
+Env vars (prefixed `PANDO_RELAY_`): `ADDR`, `STORE_PATH`, `AUTH_TOKEN`, `QUEUE_TTL`, `MAX_MESSAGE_BYTES`, `MAX_QUEUED_MESSAGES`, `MAX_QUEUED_BYTES`, `RATE_LIMIT_PER_MINUTE`, `ALLOWED_ORIGINS`, `LANDING_PAGE`
 CLI flags take precedence over env vars. Relay applies env first, then overrides with flags.
 
 ## Testing Conventions
@@ -204,4 +201,4 @@ Key external deps:
 - `go.etcd.io/bbolt` — embedded KV store for relay queues
 - `golang.org/x/crypto/nacl/box` — E2E encryption
 - `github.com/google/uuid` — device IDs
-- `github.com/atotto/clipboard` — invite code copy in pandoctl
+- `github.com/atotto/clipboard` — invite code copy in pando

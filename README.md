@@ -150,7 +150,11 @@ Supported environment variables:
 | `PANDO_RELAY_STORE_PATH` | Path to durable mailbox database |
 | `PANDO_RELAY_QUEUE_TTL` | How long to hold messages for offline peers |
 | `PANDO_RELAY_MAX_MESSAGE_BYTES` | Maximum envelope size |
+| `PANDO_RELAY_MAX_QUEUED_MESSAGES` | Maximum queued messages per mailbox |
+| `PANDO_RELAY_MAX_QUEUED_BYTES` | Maximum queued payload bytes per mailbox |
 | `PANDO_RELAY_RATE_LIMIT_PER_MINUTE` | Per-connection rate limit |
+| `PANDO_RELAY_ALLOWED_ORIGINS` | Comma-separated CORS allowed origins |
+| `PANDO_RELAY_LANDING_PAGE` | Serve landing page at `/` (`true` or `false`)|
 
 Flags take precedence over environment variables. Invalid values fail startup with an explicit error.
 
@@ -160,7 +164,7 @@ The relay is packaged as a Docker container:
 
 ```bash
 docker build -t pando-relay .
-docker run --rm -p 8080:80 -v "$PWD/storage:/storage" pando-relay
+docker run --rm -p 8080:8080 -v "$PWD/storage:/storage" pando-relay --addr :8080 --store /storage/relay.db
 ```
 
 The image uses vendored Go dependencies and does not fetch modules at build time.
@@ -183,6 +187,33 @@ curl http://localhost:8080/up
 # ws://localhost:8080/ws
 # wss://relay.example.com/ws  (with TLS termination)
 ```
+
+## CLI Reference
+
+The `pando` binary handles both the TUI client and management subcommands:
+
+| Command | Description |
+|---|---|
+| `pando` | Start the TUI chat client |
+| `pando identity init` | Create a new identity for a mailbox |
+| `pando identity show` | Display identity details (fingerprint, devices) |
+| `pando identity invite-code` | Generate an invite code (`--raw`, `--copy`, `--qr`) |
+| `pando identity export-invite` | Export invite bundle to a JSON file |
+| `pando contact add` | Add and verify a contact (`--code`, `--paste`, `--from-clipboard`, `--stdin`, `--qr-image`) |
+| `pando contact import` | Import a contact without auto-verifying |
+| `pando contact list` | List all contacts |
+| `pando contact show` | Show contact details |
+| `pando contact verify` | Mark a contact as verified |
+| `pando device list` | List enrolled devices |
+| `pando device revoke` | Revoke a device |
+| `pando device enroll create` | Create an enrollment request for a new device |
+| `pando device enroll approve` | Approve an enrollment request |
+| `pando device enroll complete` | Complete enrollment on the new device |
+| `pando config show` | Show device-wide defaults |
+| `pando config set relay <url>` | Set default relay URL |
+| `pando config set relay-token <token>` | Set default relay auth token |
+| `pando config set mailbox <mailbox>` | Set default mailbox |
+| `pando eject` | Permanently delete local data for a mailbox |
 
 ## Docs
 
