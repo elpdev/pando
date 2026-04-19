@@ -51,8 +51,10 @@ func sanitizeStoreFilename(value string) string {
 			continue
 		}
 		switch r {
-		case '.', '-', '_', '@', ' ':
+		case '.', '-', '_', '@':
 			b.WriteRune(r)
+		case ' ':
+			b.WriteByte('_')
 		default:
 			b.WriteByte('_')
 		}

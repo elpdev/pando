@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/elpdev/pando/internal/identity"
@@ -36,5 +37,16 @@ func TestSaveAttachmentRejectsTraversalComponents(t *testing.T) {
 	}
 	if _, err := clientStore.SaveAttachment("bob", "../file-1", "photo.png", []byte("hello")); err == nil {
 		t.Fatal("expected traversal attachment id to be rejected")
+	}
+}
+
+func TestSaveAttachmentReplacesSpacesInFilename(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	path, err := clientStore.SaveAttachment("bob", "file-1", "my photo clip.m4a", []byte("hello"))
+	if err != nil {
+		t.Fatalf("save attachment: %v", err)
+	}
+	if got, want := filepath.Base(path), "file-1-my_photo_clip.m4a"; got != want {
+		t.Fatalf("unexpected saved filename: got %q want %q", got, want)
 	}
 }
