@@ -17,7 +17,6 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
-	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type stubClient struct{}
@@ -93,8 +92,8 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 
 	model.input.SetValue("hi")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if model.status != "cannot send: relay auth failed; restart with --relay-token" {
-		t.Fatalf("unexpected send status: %q", model.status)
+	if toast, _ := model.Toast(); toast != "cannot send: relay auth failed; restart with --relay-token" {
+		t.Fatalf("unexpected send toast: %q", toast)
 	}
 	if model.input.Value() != "hi" {
 		t.Fatalf("expected input to remain unchanged, got %q", model.input.Value())
@@ -177,8 +176,14 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 		t.Fatalf("expected bob history to load, got %+v", model.messages)
 	}
 	view = model.View()
-	if !strings.Contains(view, "fingerprint "+style.FormatFingerprint(bobContact.Fingerprint())+"  verified") {
-		t.Fatalf("expected active fingerprint header: %q", view)
+	if !strings.Contains(view, "bob") {
+		t.Fatalf("expected peer name in conversation pane: %q", view)
+	}
+	if model.PeerFingerprint() != bobContact.Fingerprint() {
+		t.Fatalf("expected peer fingerprint %q, got %q", bobContact.Fingerprint(), model.PeerFingerprint())
+	}
+	if !model.PeerVerified() {
+		t.Fatalf("expected active peer to be verified")
 	}
 	if model.input.Placeholder != "Message bob" {
 		t.Fatalf("unexpected input placeholder: %q", model.input.Placeholder)
@@ -203,8 +208,8 @@ func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
 	model.input.SetValue("hi")
 
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if model.status != "select a contact from the sidebar first" {
-		t.Fatalf("unexpected status: %q", model.status)
+	if toast, _ := model.Toast(); toast != "select a contact from the sidebar first" {
+		t.Fatalf("unexpected toast: %q", toast)
 	}
 	if model.input.Value() != "hi" {
 		t.Fatalf("expected input to stay intact, got %q", model.input.Value())
@@ -239,8 +244,8 @@ func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
 	if model.addContactOpen {
 		t.Fatal("expected add contact modal to close")
 	}
-	if model.status != "add contact cancelled" {
-		t.Fatalf("unexpected status: %q", model.status)
+	if toast, _ := model.Toast(); toast != "add contact cancelled" {
+		t.Fatalf("unexpected toast: %q", toast)
 	}
 }
 
@@ -289,15 +294,18 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	if !model.peerVerified {
 		t.Fatal("expected imported contact to be verified")
 	}
-	if model.status != "added verified contact bob" {
-		t.Fatalf("unexpected status: %q", model.status)
+	if toast, _ := model.Toast(); toast != "added verified contact bob" {
+		t.Fatalf("unexpected toast: %q", toast)
 	}
 	view := model.View()
 	if !strings.Contains(view, "bob  verified") {
 		t.Fatalf("expected imported contact in sidebar: %q", view)
 	}
-	if !strings.Contains(view, "fingerprint "+style.FormatFingerprint(bobService.Identity().Fingerprint())+"  verified") {
-		t.Fatalf("expected verified fingerprint header: %q", view)
+	if model.PeerFingerprint() != bobService.Identity().Fingerprint() {
+		t.Fatalf("expected peer fingerprint %q, got %q", bobService.Identity().Fingerprint(), model.PeerFingerprint())
+	}
+	if !model.PeerVerified() {
+		t.Fatalf("expected peer to be verified")
 	}
 	contact, err := aliceStore.LoadContact("bob")
 	if err != nil {
@@ -422,7 +430,7 @@ func TestSuccessfulConnectMarksModelConnectedWithoutAckEvent(t *testing.T) {
 	if model.connecting {
 		t.Fatal("expected connecting state to clear")
 	}
-	if model.status != "connected to relay, subscribed as alice" {
+	if model.status != "connected as alice" {
 		t.Fatalf("unexpected status: %q", model.status)
 	}
 	if model.input.Placeholder != "Select a contact to start chatting" {
@@ -807,8 +815,8 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	if len(client.sent) == 0 {
 		t.Fatal("expected picker send to produce envelopes")
 	}
-	if model.status != "selected draft.txt" && !strings.Contains(model.status, "sending file") {
-		t.Fatalf("unexpected status after picker send: %q", model.status)
+	if model.filePickerOpen {
+		t.Fatal("expected picker to close after selecting a file")
 	}
 	found := false
 	for _, message := range model.messages {
@@ -868,9 +876,6 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if model.filePickerOpen {
 		t.Fatal("expected file picker to close on escape")
-	}
-	if model.status != "file picker closed" {
-		t.Fatalf("unexpected picker close status: %q", model.status)
 	}
 }
 
@@ -1038,6 +1043,67 @@ func TestHandleInputActivitySendsTypingWithoutSavingHistory(t *testing.T) {
 	}
 	if model.localTypingSent {
 		t.Fatal("expected local typing state to reset")
+	}
+}
+
+func TestPushToastExpiresOnNextTypingTick(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+
+	model.pushToast("hello", ToastInfo)
+	if txt, level := model.Toast(); txt != "hello" || level != ToastInfo {
+		t.Fatalf("unexpected toast: %q level=%d", txt, level)
+	}
+
+	// A tick that arrives before the toast expires must preserve it.
+	model.Update(typingTickMsg(model.toast.expiresAt.Add(-1 * time.Millisecond)))
+	if txt, _ := model.Toast(); txt != "hello" {
+		t.Fatalf("expected toast to remain before expiry, got %q", txt)
+	}
+	// A tick at or after the expiry clears it.
+	model.Update(typingTickMsg(model.toast.expiresAt.Add(1 * time.Millisecond)))
+	if txt, _ := model.Toast(); txt != "" {
+		t.Fatalf("expected toast cleared after expiry, got %q", txt)
+	}
+}
+
+func TestConnectionStateReflectsFlags(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+
+	if got := model.ConnectionState(); got != ConnConnecting {
+		t.Fatalf("expected ConnConnecting, got %v", got)
+	}
+	model.markConnected("connected as alice")
+	if got := model.ConnectionState(); got != ConnConnected {
+		t.Fatalf("expected ConnConnected, got %v", got)
+	}
+	model.disconnected = true
+	model.connected = false
+	if got := model.ConnectionState(); got != ConnDisconnected {
+		t.Fatalf("expected ConnDisconnected, got %v", got)
+	}
+	model.authFailed = true
+	if got := model.ConnectionState(); got != ConnAuthFailed {
+		t.Fatalf("expected ConnAuthFailed, got %v", got)
 	}
 }
 
