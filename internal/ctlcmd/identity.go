@@ -8,6 +8,7 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
+	"github.com/elpdev/pando/internal/ui/style"
 	qrterminal "github.com/mdp/qrterminal/v3"
 )
 
@@ -50,7 +51,7 @@ func runInit(args []string) error {
 	} else {
 		fmt.Printf("identity already exists for %s on device %s\n", id.AccountID, mustCurrentMailbox(id))
 	}
-	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
 	return nil
 }
 
@@ -144,13 +145,13 @@ func runInviteCode(args []string) error {
 	}
 	if *qrOutput {
 		fmt.Printf("account: %s\n", id.AccountID)
-		fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+		fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
 		qrterminal.GenerateHalfBlock(code, qrterminal.L, os.Stdout)
 		fmt.Println("share this QR or import a saved QR image with: pando contact add --mailbox <their-mailbox> --qr-image <path>")
 		return nil
 	}
 	fmt.Printf("account: %s\n", id.AccountID)
-	fmt.Printf("fingerprint: %s\n", id.Fingerprint())
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
 	fmt.Printf("invite-code: %s\n", code)
 	fmt.Println("share the invite-code value above, or use --raw, --copy, or --qr for easier sharing")
 	fmt.Println("the other person can import it with: pando contact add --mailbox <their-mailbox> --paste")

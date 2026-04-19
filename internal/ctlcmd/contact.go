@@ -6,6 +6,7 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func runContact(args []string) error {
@@ -86,9 +87,9 @@ func runImportContactWithName(name string, args []string) error {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
-	fmt.Printf("fingerprint: %s\n", contact.Fingerprint())
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(contact.Fingerprint()))
 	if contact.Verified {
-		fmt.Printf("verified contact %s (%s)\n", contact.AccountID, contact.Fingerprint())
+		fmt.Printf("verified contact %s (%s)\n", contact.AccountID, style.FormatFingerprint(contact.Fingerprint()))
 	} else {
 		fmt.Printf("next: pando contact verify --mailbox %s --contact %s --fingerprint %s\n", mailbox, contact.AccountID, contact.Fingerprint())
 	}
@@ -182,6 +183,6 @@ func runVerifyContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	fmt.Printf("verified contact %s (%s)\n", contact.AccountID, contact.Fingerprint())
+	fmt.Printf("verified contact %s (%s)\n", contact.AccountID, style.FormatFingerprint(contact.Fingerprint()))
 	return nil
 }

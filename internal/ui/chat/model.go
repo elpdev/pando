@@ -771,12 +771,12 @@ func (m *Model) renderSidebar() string {
 			mailboxStyle = style.Selected
 		}
 		if contact.Mailbox == m.recipientMailbox {
-			mailboxStyle = style.Accent.Bold(true)
+			mailboxStyle = style.PeerAccentStyle(contact.Fingerprint).Bold(true)
 		}
-		statusStyle := style.Warning
+		statusStyle := style.UnverifiedWarn
 		statusText := "unverified"
 		if contact.Verified {
-			statusStyle = style.Accent
+			statusStyle = style.VerifiedOk
 			statusText = "verified"
 		}
 		line := fmt.Sprintf("%s  %s", mailboxStyle.Render(contact.Mailbox), statusStyle.Render(statusText))
@@ -803,7 +803,7 @@ func (m *Model) renderConversation() string {
 	}
 	header := []string{
 		style.Bold.Render(m.recipientMailbox),
-		style.Muted.Render(fmt.Sprintf("fingerprint %s  %s", m.peerFingerprint, verificationLabel(m.peerVerified))),
+		style.Muted.Render(fmt.Sprintf("fingerprint %s  %s", style.FormatFingerprint(m.peerFingerprint), verificationLabel(m.peerVerified))),
 		style.Muted.Render("ctrl+o attach file  |  /send-photo <path>  |  /send-voice <path>"),
 		m.viewport.View(),
 		m.renderTypingIndicator(),
@@ -820,41 +820,41 @@ func (m *Model) renderAddContactModal(base string) string {
 	}
 	bodyWidth := max(24, modalWidth-6)
 	inputHeight := max(5, modalHeight-10)
-	title := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("230")).Render("Add Contact")
-	description := lipgloss.NewStyle().Foreground(lipgloss.Color("248")).Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Imported contacts are marked verified immediately and opened right away.")
+	title := style.Bright.Bold(true).Render("Add Contact")
+	description := style.Dim.Width(bodyWidth).Render("Paste a raw invite code or the full invite text. Imported contacts are marked verified immediately and opened right away.")
 	input := m.renderAddContactEditor(bodyWidth, inputHeight)
 	footerText := "enter newline  ctrl+s import  ctrl+u clear  esc cancel"
 	if m.addContactImporting {
 		footerText = "importing contact..."
 	}
-	footer := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render(footerText)
+	footer := style.Subtle.Render(footerText)
 	parts := []string{title, description, input}
 	if m.addContactError != "" {
-		parts = append(parts, lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Width(bodyWidth).Render(m.addContactError))
+		parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.addContactError))
 	}
 	parts = append(parts, footer)
-	modal := lipgloss.NewStyle().Width(modalWidth).Padding(1, 2).BorderStyle(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("69")).Background(lipgloss.Color("235")).Render(strings.Join(parts, "\n\n"))
-	background := lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render(base)
+	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(strings.Join(parts, "\n\n"))
+	background := style.Faint.Render(base)
 	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
 }
 
 func (m *Model) renderAddContactEditor(width, height int) string {
 	content := m.addContactValue
 	if content == "" {
-		content = lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("account: alice\nfingerprint: ...\ninvite-code: ...")
+		content = style.Muted.Render("account: alice\nfingerprint: ...\ninvite-code: ...")
 	} else {
-		content += lipgloss.NewStyle().Foreground(lipgloss.Color("69")).Render("█")
+		content += style.CursorBlock.Render("█")
 	}
 	lines := strings.Split(content, "\n")
 	if len(lines) > height {
 		lines = lines[len(lines)-height:]
 	}
 	visible := strings.Join(lines, "\n")
-	meta := lipgloss.NewStyle().Foreground(lipgloss.Color("243")).Render(fmt.Sprintf("%d chars", len([]rune(m.addContactValue))))
+	meta := style.Subtle.Render(fmt.Sprintf("%d chars", len([]rune(m.addContactValue))))
 	if len(m.addContactValue) >= addContactLimit {
-		meta = lipgloss.NewStyle().Foreground(lipgloss.Color("203")).Render(fmt.Sprintf("input limit reached (%d chars)", addContactLimit))
+		meta = style.StatusBad.Render(fmt.Sprintf("input limit reached (%d chars)", addContactLimit))
 	}
-	box := lipgloss.NewStyle().Width(width).Height(height).Padding(0, 1).BorderStyle(lipgloss.NormalBorder()).BorderForeground(lipgloss.Color("240")).Render(visible)
+	box := style.InputBorder.Width(width).Height(height).Padding(0, 1).Render(visible)
 	return strings.Join([]string{box, meta}, "\n")
 }
 
@@ -1153,16 +1153,16 @@ func readFilePickerEntries(dir string) ([]filePickerEntry, string, error) {
 }
 
 func (m *Model) renderFilePicker(width int) string {
-	title := lipgloss.NewStyle().Bold(true).Render("Attach File")
-	dirLine := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(m.filePickerDir)
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("enter open/select  |  backspace up  |  esc cancel")
+	title := style.Bold.Render("Attach File")
+	dirLine := style.Muted.Render(m.filePickerDir)
+	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
 	lines := []string{title, dirLine, hint, ""}
 	visibleEntries, hiddenAbove, hiddenBelow := m.filePickerVisibleEntries(max(1, m.height-12))
 	if len(m.filePickerEntries) == 0 {
-		lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("This directory is empty."))
+		lines = append(lines, style.Muted.Render("This directory is empty."))
 	} else {
 		if hiddenAbove {
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("..."))
+			lines = append(lines, style.Muted.Render("..."))
 		}
 		for _, visible := range visibleEntries {
 			idx := visible.index
@@ -1171,22 +1171,22 @@ func (m *Model) renderFilePicker(width int) string {
 			if entry.IsDir {
 				label += string(filepath.Separator)
 			}
-			style := lipgloss.NewStyle()
+			rowStyle := lipgloss.NewStyle()
 			if entry.IsDir {
-				style = style.Foreground(lipgloss.Color("86"))
+				rowStyle = rowStyle.Inherit(style.StatusOk)
 			}
 			if idx == m.filePickerSelected {
-				style = style.Background(lipgloss.Color("238")).Bold(true)
+				rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
 			}
-			lines = append(lines, style.Render(label))
+			lines = append(lines, rowStyle.Render(label))
 		}
 		if hiddenBelow {
-			lines = append(lines, lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render("..."))
+			lines = append(lines, style.Muted.Render("..."))
 		}
 	}
 	modalWidth := min(max(48, width-6), width)
 	modalHeight := max(8, m.height-4)
-	modal := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
+	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
 	return lipgloss.Place(width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
 }
 

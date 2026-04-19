@@ -17,6 +17,7 @@ import (
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type stubClient struct{}
@@ -176,7 +177,7 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 		t.Fatalf("expected bob history to load, got %+v", model.messages)
 	}
 	view = model.View()
-	if !strings.Contains(view, "fingerprint "+bobContact.Fingerprint()+"  verified") {
+	if !strings.Contains(view, "fingerprint "+style.FormatFingerprint(bobContact.Fingerprint())+"  verified") {
 		t.Fatalf("expected active fingerprint header: %q", view)
 	}
 	if model.input.Placeholder != "Message bob" {
@@ -295,7 +296,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	if !strings.Contains(view, "bob  verified") {
 		t.Fatalf("expected imported contact in sidebar: %q", view)
 	}
-	if !strings.Contains(view, "fingerprint "+bobService.Identity().Fingerprint()+"  verified") {
+	if !strings.Contains(view, "fingerprint "+style.FormatFingerprint(bobService.Identity().Fingerprint())+"  verified") {
 		t.Fatalf("expected verified fingerprint header: %q", view)
 	}
 	contact, err := aliceStore.LoadContact("bob")
