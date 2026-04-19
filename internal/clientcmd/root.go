@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui"
@@ -58,6 +59,13 @@ func Execute(args []string) error {
 	service, _, err := messaging.New(clientStore, cfg.Mailbox)
 	if err != nil {
 		return err
+	}
+	if strings.TrimSpace(cfg.RelayURL) != "" {
+		directoryClient, err := relayapi.NewClient(cfg.RelayURL, cfg.RelayToken)
+		if err != nil {
+			return err
+		}
+		service.SetDirectoryClient(directoryClient)
 	}
 	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, service.Identity())
 	chatModel := chat.New(chat.Deps{

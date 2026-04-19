@@ -58,6 +58,32 @@ func (f *fakeRelayClient) LookupDirectoryEntry(mailbox string) (*relayapi.Signed
 	return entry, nil
 }
 
+func (f *fakeRelayClient) LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, entry := range f.directory {
+		for _, device := range entry.Entry.Bundle.Devices {
+			if device.Mailbox == mailbox {
+				return entry, nil
+			}
+		}
+	}
+	return nil, fmt.Errorf("directory: device mailbox %q not found", mailbox)
+}
+
+func (f *fakeRelayClient) ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	entries := make([]relayapi.SignedDirectoryEntry, 0, len(f.directory))
+	for _, entry := range f.directory {
+		if !entry.Entry.Discoverable {
+			continue
+		}
+		entries = append(entries, *entry)
+	}
+	return entries, nil
+}
+
 func (f *fakeRelayClient) PutRendezvousPayload(id string, p relayapi.RendezvousPayload) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

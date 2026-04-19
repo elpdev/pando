@@ -14,6 +14,14 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 	if !s.authorizeRequest(w, r) {
 		return
 	}
+	if r.URL.Path == "/directory/discoverable" {
+		s.handleDiscoverableDirectory(w, r)
+		return
+	}
+	if strings.HasPrefix(r.URL.Path, "/directory/devices/") {
+		s.handleDirectoryDeviceLookup(w, r)
+		return
+	}
 	mailbox := strings.TrimPrefix(r.URL.Path, "/directory/mailboxes/")
 	if mailbox == "" || strings.Contains(mailbox, "/") {
 		http.NotFound(w, r)
@@ -60,6 +68,43 @@ func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Allow", "GET, PUT")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+func (s *Server) handleDiscoverableDirectory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entries, err := s.queue.ListDiscoverableEntries()
+	if err != nil {
+		s.writeJSONError(w, http.StatusInternalServerError, "load discoverable directory entries")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, relayapi.ListDirectoryResponse{Entries: entries})
+}
+
+func (s *Server) handleDirectoryDeviceLookup(w http.ResponseWriter, r *http.Request) {
+	mailbox := strings.TrimPrefix(r.URL.Path, "/directory/devices/")
+	if mailbox == "" || strings.Contains(mailbox, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	entry, err := s.queue.LookupDirectoryEntryByDeviceMailbox(mailbox)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			s.writeJSONError(w, http.StatusNotFound, "directory entry not found")
+			return
+		}
+		s.writeJSONError(w, http.StatusInternalServerError, "load directory entry")
+		return
+	}
+	s.writeJSON(w, http.StatusOK, entry)
 }
 
 func (s *Server) handleRendezvous(w http.ResponseWriter, r *http.Request) {

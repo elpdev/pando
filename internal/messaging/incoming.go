@@ -2,11 +2,13 @@ package messaging
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/session"
 	"github.com/elpdev/pando/internal/store"
 )
@@ -20,9 +22,12 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		return &IncomingResult{Duplicate: true}, nil
 	}
 
-	contact, err := s.resolveIncomingSender(envelope.SenderMailbox)
+	contact, err := s.store.LoadContactByDeviceMailbox(envelope.SenderMailbox)
 	if err != nil {
-		return nil, err
+		if !errors.Is(err, store.ErrNotFound) {
+			return nil, err
+		}
+		return s.handleIncomingUnknownSender(envelope)
 	}
 
 	body, err := s.decryptIncomingEnvelope(contact, envelope)
@@ -55,19 +60,41 @@ func (s *Service) markIncomingEnvelopeSeen(envelopeID string) (bool, error) {
 	return false, nil
 }
 
-func (s *Service) resolveIncomingSender(senderMailbox string) (*identity.Contact, error) {
-	contact, err := s.store.LoadContactByDeviceMailbox(senderMailbox)
-	if err != nil {
-		if err == store.ErrNotFound {
-			return nil, fmt.Errorf("no contact device for sender mailbox %q", senderMailbox)
-		}
-		return nil, err
-	}
-	return contact, nil
-}
-
 func (s *Service) decryptIncomingEnvelope(contact *identity.Contact, envelope protocol.Envelope) (string, error) {
 	return session.Decrypt(s.identity, contact, envelope)
+}
+
+func (s *Service) handleIncomingUnknownSender(envelope protocol.Envelope) (*IncomingResult, error) {
+	if s.directory == nil {
+		return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
+	}
+	entry, err := s.directory.LookupDirectoryEntryByDeviceMailbox(envelope.SenderMailbox)
+	if err != nil {
+		return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
+	}
+	if err := relayapi.VerifySignedDirectoryEntry(*entry); err != nil {
+		return nil, err
+	}
+	contact, err := identity.ContactFromInvite(entry.Entry.Bundle)
+	if err != nil {
+		return nil, err
+	}
+	body, err := s.decryptIncomingEnvelope(contact, envelope)
+	if err != nil {
+		return nil, err
+	}
+	payload, ok, err := decodeContentPayload(body)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || (payload.Kind != contentKindContactRequest && payload.Kind != contentKindContactResponse) {
+		return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
+	}
+	result, err := s.handleIncomingPayload(contact, payload)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *Service) buildIncomingChatResult(contact *identity.Contact, envelope protocol.Envelope, body string) (*IncomingResult, error) {

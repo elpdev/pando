@@ -2,6 +2,7 @@ package relay
 
 import (
 	"bytes"
+	"sort"
 	"sync"
 	"time"
 
@@ -111,6 +112,31 @@ func (s *MemoryQueueStore) LookupMailboxAccount(mailbox string) (string, error) 
 		return "", ErrNotFound
 	}
 	return account, nil
+}
+
+func (s *MemoryQueueStore) LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error) {
+	account, err := s.LookupMailboxAccount(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetDirectoryEntry(account)
+}
+
+func (s *MemoryQueueStore) ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	entries := make([]relayapi.SignedDirectoryEntry, 0, len(s.directory))
+	for _, entry := range s.directory {
+		if !entry.Entry.Discoverable {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Entry.Mailbox < entries[j].Entry.Mailbox
+	})
+	return entries, nil
 }
 
 func (s *MemoryQueueStore) PutRendezvousPayload(id string, payload relayapi.RendezvousPayload) error {

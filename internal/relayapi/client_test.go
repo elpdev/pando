@@ -154,6 +154,10 @@ func TestRelayAPIClientRoundTripsDirectoryAndRendezvousEndpoints(t *testing.T) {
 			default:
 				t.Fatalf("unexpected method %s", r.Method)
 			}
+		case "/directory/devices/alice":
+			_ = json.NewEncoder(w).Encode(signed)
+		case "/directory/discoverable":
+			_ = json.NewEncoder(w).Encode(ListDirectoryResponse{Entries: []SignedDirectoryEntry{*signed}})
 		default:
 			t.Fatalf("unexpected path %s", r.URL.Path)
 		}
@@ -187,6 +191,20 @@ func TestRelayAPIClientRoundTripsDirectoryAndRendezvousEndpoints(t *testing.T) {
 	}
 	if err := client.DeleteRendezvous("test-room"); err != nil {
 		t.Fatalf("delete rendezvous: %v", err)
+	}
+	loaded, err = client.LookupDirectoryEntryByDeviceMailbox("alice")
+	if err != nil {
+		t.Fatalf("lookup directory entry by device mailbox: %v", err)
+	}
+	if loaded.Entry.Mailbox != "alice" {
+		t.Fatalf("unexpected device mailbox lookup entry: %+v", loaded)
+	}
+	entries, err := client.ListDiscoverableEntries()
+	if err != nil {
+		t.Fatalf("list discoverable entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Entry.Mailbox != "alice" {
+		t.Fatalf("unexpected discoverable entries: %+v", entries)
 	}
 }
 

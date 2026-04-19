@@ -60,7 +60,7 @@ func runInit(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken); err != nil {
+		if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, false); err != nil {
 			return fmt.Errorf("publish relay directory entry: %w", err)
 		}
 		fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)

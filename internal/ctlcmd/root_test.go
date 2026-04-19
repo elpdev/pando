@@ -2,6 +2,8 @@ package ctlcmd
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"image"
 	"image/color"
 	"image/draw"
@@ -17,9 +19,12 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
+	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
+	wsclient "github.com/elpdev/pando/internal/transport/ws"
 	"rsc.io/qr"
 )
 
@@ -448,7 +453,7 @@ func TestPublishDirectoryAndLookupContact(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
-	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
 		t.Fatalf("publish directory: %v", err)
 	}
 	if err := runLookupContact([]string{"-mailbox", "bob", "-data-dir", bobDir, "-contact", "alice", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
@@ -463,6 +468,110 @@ func TestPublishDirectoryAndLookupContact(t *testing.T) {
 	}
 	if contact.TrustSource != identity.TrustSourceRelayDirectory {
 		t.Fatalf("expected relay trust source, got %q", contact.TrustSource)
+	}
+}
+
+func TestDiscoverContactsListsOnlyDiscoverableEntries(t *testing.T) {
+	serverURL := newRelayTestServer(t)
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	if _, _, err := store.NewClientStore(aliceDir).LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := store.NewClientStore(bobDir).LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
+		t.Fatalf("publish discoverable alice directory: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "bob", "-data-dir", bobDir, "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("publish bob directory: %v", err)
+	}
+	output := captureStdout(t, func() {
+		if err := runDiscoverContacts([]string{"-relay", serverURL, "-relay-token", "secret"}); err != nil {
+			t.Fatalf("discover contacts: %v", err)
+		}
+	})
+	var entries []struct {
+		Mailbox string `json:"mailbox"`
+	}
+	if err := json.Unmarshal([]byte(output), &entries); err != nil {
+		t.Fatalf("decode discover output: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Mailbox != "alice" {
+		t.Fatalf("expected only discoverable alice entry, got %+v", entries)
+	}
+}
+
+func TestRequestAcceptAndRejectContactFlow(t *testing.T) {
+	serverURL := newRelayTestServer(t)
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	if _, _, err := store.NewClientStore(aliceDir).LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := store.NewClientStore(bobDir).LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
+		t.Fatalf("publish discoverable alice directory: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "bob", "-data-dir", bobDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
+		t.Fatalf("publish discoverable bob directory: %v", err)
+	}
+	if err := runRequestContact([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-contact", "bob", "-relay", serverURL, "-relay-token", "secret", "-note", "hi bob"}); err != nil {
+		t.Fatalf("request contact: %v", err)
+	}
+	bobResult := receiveNextControlResult(t, serverURL, bobDir, "bob")
+	if bobResult.ContactRequest == nil || bobResult.ContactRequest.AccountID != "alice" || bobResult.ContactRequest.Note != "hi bob" {
+		t.Fatalf("unexpected bob request result: %+v", bobResult)
+	}
+	bobRequestsOutput := captureStdout(t, func() {
+		if err := runListContactRequests([]string{"-mailbox", "bob", "-data-dir", bobDir}); err != nil {
+			t.Fatalf("list bob contact requests: %v", err)
+		}
+	})
+	if !strings.Contains(bobRequestsOutput, "alice") || !strings.Contains(bobRequestsOutput, "pending") {
+		t.Fatalf("expected pending alice request in output, got %q", bobRequestsOutput)
+	}
+	if err := runAcceptContactRequest([]string{"-mailbox", "bob", "-data-dir", bobDir, "-contact", "alice", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("accept contact request: %v", err)
+	}
+	aliceResult := receiveNextControlResult(t, serverURL, aliceDir, "alice")
+	if aliceResult.ContactRequest == nil || aliceResult.ContactRequest.Status != store.ContactRequestStatusAccepted {
+		t.Fatalf("unexpected alice accepted request result: %+v", aliceResult)
+	}
+	aliceContact, err := store.NewClientStore(aliceDir).LoadContact("bob")
+	if err != nil {
+		t.Fatalf("load accepted bob contact: %v", err)
+	}
+	if aliceContact.AccountID != "bob" {
+		t.Fatalf("unexpected accepted contact: %+v", aliceContact)
+	}
+
+	carolDir := t.TempDir()
+	if _, _, err := store.NewClientStore(carolDir).LoadOrCreateIdentity("carol"); err != nil {
+		t.Fatalf("create carol identity: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "carol", "-data-dir", carolDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
+		t.Fatalf("publish discoverable carol directory: %v", err)
+	}
+	if err := runRequestContact([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-contact", "carol", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("request carol contact: %v", err)
+	}
+	carolResult := receiveNextControlResult(t, serverURL, carolDir, "carol")
+	if carolResult.ContactRequest == nil || carolResult.ContactRequest.AccountID != "alice" {
+		t.Fatalf("unexpected carol request result: %+v", carolResult)
+	}
+	if err := runRejectContactRequest([]string{"-mailbox", "carol", "-data-dir", carolDir, "-contact", "alice", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("reject contact request: %v", err)
+	}
+	aliceRejectResult := receiveNextControlResult(t, serverURL, aliceDir, "alice")
+	if aliceRejectResult.ContactRequest == nil || aliceRejectResult.ContactRequest.Status != store.ContactRequestStatusRejected {
+		t.Fatalf("unexpected alice rejected request result: %+v", aliceRejectResult)
+	}
+	if _, err := store.NewClientStore(aliceDir).LoadContact("carol"); err != store.ErrNotFound {
+		t.Fatalf("expected no carol contact after rejection, got %v", err)
 	}
 }
 
@@ -541,4 +650,46 @@ func captureStdout(t *testing.T, fn func()) string {
 		t.Fatalf("read stdout: %v", err)
 	}
 	return buf.String()
+}
+
+func receiveNextControlResult(t *testing.T, serverURL, dataDir, mailbox string) *messaging.IncomingResult {
+	t.Helper()
+	clientStore := store.NewClientStore(dataDir)
+	service, _, err := messaging.New(clientStore, mailbox)
+	if err != nil {
+		t.Fatalf("new messaging service for %s: %v", mailbox, err)
+	}
+	directoryClient, err := relayapi.NewClient(serverURL, "secret")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	service.SetDirectoryClient(directoryClient)
+	client := wsclient.NewClient(serverURL, "secret", service.Identity())
+	defer client.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect relay client for %s: %v", mailbox, err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-client.Events():
+			if event.Err != nil {
+				t.Fatalf("relay event error for %s: %v", mailbox, event.Err)
+			}
+			if event.Message == nil || event.Message.Type != protocol.MessageTypeIncoming || event.Message.Incoming == nil {
+				continue
+			}
+			result, err := service.HandleIncoming(*event.Message.Incoming)
+			if err != nil {
+				t.Fatalf("handle incoming envelope for %s: %v", mailbox, err)
+			}
+			if result != nil && result.Control {
+				return result
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for control result for %s", mailbox)
+		}
+	}
 }

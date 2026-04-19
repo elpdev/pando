@@ -13,6 +13,8 @@ import (
 // from the trusted directory. Kept as an interface so tests can stub it.
 type DirectoryClient interface {
 	LookupDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error)
 }
 
 type IncomingResult struct {
@@ -30,6 +32,7 @@ type IncomingResult struct {
 
 	// ContactUpdated is set only for contact-update control messages.
 	ContactUpdated *identity.Contact
+	ContactRequest *store.ContactRequest
 
 	// TypingState and TypingExpiresAt are set only for typing control messages.
 	TypingState     string
@@ -45,6 +48,7 @@ type Service struct {
 	store               *store.ClientStore
 	identity            *identity.Identity
 	incomingAttachments *incomingAttachmentAssembler
+	directory           DirectoryClient
 }
 
 func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
@@ -84,6 +88,14 @@ func (s *Service) Devices() ([]identity.Device, error) {
 		devices = append(devices, device)
 	}
 	return devices, nil
+}
+
+func (s *Service) SetDirectoryClient(client DirectoryClient) {
+	s.directory = client
+}
+
+func (s *Service) ContactRequests() ([]store.ContactRequest, error) {
+	return s.store.ListContactRequests()
 }
 
 func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {

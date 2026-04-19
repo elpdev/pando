@@ -80,6 +80,8 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/logo.webp", s.handleLogo)
 	}
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/directory/discoverable", s.handleDirectory)
+	mux.HandleFunc("/directory/devices/", s.handleDirectory)
 	mux.HandleFunc("/directory/mailboxes/", s.handleDirectory)
 	mux.HandleFunc("/rendezvous/", s.handleRendezvous)
 	mux.HandleFunc("/up", s.handleHealth)

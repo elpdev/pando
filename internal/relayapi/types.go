@@ -13,10 +13,11 @@ import (
 )
 
 type DirectoryEntry struct {
-	Mailbox     string                `json:"mailbox"`
-	Bundle      identity.InviteBundle `json:"bundle"`
-	PublishedAt time.Time             `json:"published_at"`
-	Version     int64                 `json:"version"`
+	Mailbox      string                `json:"mailbox"`
+	Bundle       identity.InviteBundle `json:"bundle"`
+	Discoverable bool                  `json:"discoverable,omitempty"`
+	PublishedAt  time.Time             `json:"published_at"`
+	Version      int64                 `json:"version"`
 }
 
 type SignedDirectoryEntry struct {
@@ -37,6 +38,10 @@ type PutRendezvousRequest struct {
 
 type GetRendezvousResponse struct {
 	Payloads []RendezvousPayload `json:"payloads"`
+}
+
+type ListDirectoryResponse struct {
+	Entries []SignedDirectoryEntry `json:"entries"`
 }
 
 func SignDirectoryEntry(entry DirectoryEntry, privateKey ed25519.PrivateKey) (*SignedDirectoryEntry, error) {
@@ -106,17 +111,19 @@ func directoryEntrySigningBytes(entry DirectoryEntry) ([]byte, error) {
 		return devices[i].Mailbox < devices[j].Mailbox
 	})
 	bytes, err := json.Marshal(struct {
-		Mailbox             string            `json:"mailbox"`
-		AccountID           string            `json:"account_id"`
-		AccountSigningKey   string            `json:"account_signing_public"`
-		Devices             []canonicalDevice `json:"devices"`
-		PublishedAt         time.Time         `json:"published_at"`
-		Version             int64             `json:"version"`
+		Mailbox           string            `json:"mailbox"`
+		AccountID         string            `json:"account_id"`
+		AccountSigningKey string            `json:"account_signing_public"`
+		Devices           []canonicalDevice `json:"devices"`
+		Discoverable      bool              `json:"discoverable,omitempty"`
+		PublishedAt       time.Time         `json:"published_at"`
+		Version           int64             `json:"version"`
 	}{
 		Mailbox:           entry.Mailbox,
 		AccountID:         entry.Bundle.AccountID,
 		AccountSigningKey: base64.StdEncoding.EncodeToString(entry.Bundle.AccountSigningPublic),
 		Devices:           devices,
+		Discoverable:      entry.Discoverable,
 		PublishedAt:       entry.PublishedAt.UTC(),
 		Version:           entry.Version,
 	})

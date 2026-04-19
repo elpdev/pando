@@ -28,6 +28,8 @@ type MailboxStore interface {
 type DirectoryStore interface {
 	PutDirectoryEntry(relayapi.SignedDirectoryEntry) error
 	GetDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error)
 	LookupMailboxAccount(mailbox string) (string, error)
 }
 

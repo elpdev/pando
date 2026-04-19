@@ -19,6 +19,8 @@ const (
 	contentKindContactUpdate   = "contact-update"
 	contentKindAttachmentChunk = "attachment-chunk"
 	contentKindDeliveryAck     = "delivery-ack"
+	contentKindContactRequest  = "contact-request"
+	contentKindContactResponse = "contact-request-response"
 	contentKindTyping          = "typing"
 	TypingStateActive          = "active"
 	TypingStateIdle            = "idle"
@@ -35,12 +37,24 @@ type deliveryAck struct {
 	DeliveredAt time.Time `json:"delivered_at"`
 }
 
+type contactRequest struct {
+	Bundle identity.InviteBundle `json:"bundle"`
+	Note   string                `json:"note,omitempty"`
+}
+
+type contactRequestResponse struct {
+	Decision string                 `json:"decision"`
+	Bundle   *identity.InviteBundle `json:"bundle,omitempty"`
+}
+
 type contentPayload struct {
 	Kind            string                  `json:"kind"`
 	Text            string                  `json:"text,omitempty"`
 	ContactUpdate   *identity.InviteBundle  `json:"contact_update,omitempty"`
 	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
 	DeliveryAck     *deliveryAck            `json:"delivery_ack,omitempty"`
+	ContactRequest  *contactRequest         `json:"contact_request,omitempty"`
+	ContactResponse *contactRequestResponse `json:"contact_response,omitempty"`
 	Typing          *typingIndicator        `json:"typing,omitempty"`
 }
 

@@ -15,7 +15,7 @@ import (
 
 func runContact(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pando contact <add|import|invite|list|lookup|publish-directory|show|verify> [flags]")
+		return fmt.Errorf("usage: pando contact <add|import|discover|request|requests|accept|reject|invite|list|lookup|publish-directory|show|verify> [flags]")
 	}
 	switch args[0] {
 	case "add":
@@ -26,6 +26,16 @@ func runContact(args []string) error {
 		return runPublishDirectory(args[1:])
 	case "lookup":
 		return runLookupContact(args[1:])
+	case "discover":
+		return runDiscoverContacts(args[1:])
+	case "request":
+		return runRequestContact(args[1:])
+	case "requests":
+		return runListContactRequests(args[1:])
+	case "accept":
+		return runAcceptContactRequest(args[1:])
+	case "reject":
+		return runRejectContactRequest(args[1:])
 	case "invite":
 		return runContactInvite(args[1:])
 	case "list":
@@ -195,6 +205,7 @@ func runPublishDirectory(args []string) error {
 	bfs := NewBaseFlagSet("contact publish-directory")
 	relayURL := bfs.FS.String("relay", "", "relay websocket URL")
 	relayToken := bfs.FS.String("relay-token", "", "relay auth token")
+	discoverable := bfs.FS.Bool("discoverable", false, "list this account in relay-backed discovery")
 	if err := bfs.Parse(args); err != nil {
 		return err
 	}
@@ -211,7 +222,7 @@ func runPublishDirectory(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken); err != nil {
+	if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, *discoverable); err != nil {
 		return err
 	}
 	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
@@ -219,16 +230,17 @@ func runPublishDirectory(args []string) error {
 	return nil
 }
 
-func publishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string) error {
+func publishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string, discoverable bool) error {
 	client, err := relayapi.NewClient(relayURL, relayToken)
 	if err != nil {
 		return err
 	}
 	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{
-		Mailbox:     id.AccountID,
-		Bundle:      id.InviteBundle(),
-		PublishedAt: time.Now().UTC(),
-		Version:     time.Now().UTC().UnixNano(),
+		Mailbox:      id.AccountID,
+		Bundle:       id.InviteBundle(),
+		Discoverable: discoverable,
+		PublishedAt:  time.Now().UTC(),
+		Version:      time.Now().UTC().UnixNano(),
 	}, id.AccountSigningPrivate)
 	if err != nil {
 		return err

@@ -25,6 +25,8 @@ type Deps struct {
 // can swap in an in-memory fake.
 type RelayClient interface {
 	LookupDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error)
+	ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error)
 	PutRendezvousPayload(id string, p relayapi.RendezvousPayload) error
 	GetRendezvousPayloads(id string) ([]relayapi.RendezvousPayload, error)
 }

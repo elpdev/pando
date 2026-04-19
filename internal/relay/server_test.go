@@ -305,7 +305,7 @@ func TestDirectoryEntryRoundTripOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
-	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: "alice", Bundle: alice.InviteBundle(), PublishedAt: time.Now().UTC(), Version: 1}, alice.AccountSigningPrivate)
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: "alice", Bundle: alice.InviteBundle(), Discoverable: true, PublishedAt: time.Now().UTC(), Version: 1}, alice.AccountSigningPrivate)
 	if err != nil {
 		t.Fatalf("sign directory entry: %v", err)
 	}
@@ -321,6 +321,53 @@ func TestDirectoryEntryRoundTripOverHTTP(t *testing.T) {
 	}
 	if loaded.Entry.Bundle.AccountID != "alice" {
 		t.Fatalf("expected alice directory entry, got %+v", loaded)
+	}
+	if !loaded.Entry.Discoverable {
+		t.Fatalf("expected discoverable directory entry, got %+v", loaded)
+	}
+}
+
+func TestDiscoverableDirectoryListingAndDeviceLookupOverHTTP(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+	alice := mustIdentity(t, "alice")
+	bob := mustIdentity(t, "bob")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	aliceEntry, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: "alice", Bundle: alice.InviteBundle(), Discoverable: true, PublishedAt: time.Now().UTC(), Version: 1}, alice.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign alice entry: %v", err)
+	}
+	bobEntry, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: "bob", Bundle: bob.InviteBundle(), PublishedAt: time.Now().UTC(), Version: 1}, bob.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign bob entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*aliceEntry); err != nil {
+		t.Fatalf("publish alice directory entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*bobEntry); err != nil {
+		t.Fatalf("publish bob directory entry: %v", err)
+	}
+	entries, err := client.ListDiscoverableEntries()
+	if err != nil {
+		t.Fatalf("list discoverable entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Entry.Mailbox != "alice" {
+		t.Fatalf("expected only discoverable alice entry, got %+v", entries)
+	}
+	device, err := alice.CurrentDevice()
+	if err != nil {
+		t.Fatalf("alice current device: %v", err)
+	}
+	loaded, err := client.LookupDirectoryEntryByDeviceMailbox(device.Mailbox)
+	if err != nil {
+		t.Fatalf("lookup directory entry by device mailbox: %v", err)
+	}
+	if loaded.Entry.Mailbox != "alice" {
+		t.Fatalf("expected alice directory entry from device lookup, got %+v", loaded)
 	}
 }
 
@@ -460,7 +507,7 @@ func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.I
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
-	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), Discoverable: true, PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
 	if err != nil {
 		t.Fatalf("sign directory entry: %v", err)
 	}

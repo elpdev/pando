@@ -847,13 +847,165 @@ func sendPhotoAndAwaitReceipt(t *testing.T, senderClient *wsclient.Client, sende
 	}
 }
 
+func TestHandleIncomingContactRequestFromUnknownSenderStoresPendingRequest(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	aliceEntry := mustSignedDirectoryEntry(t, aliceService.Identity(), true)
+	bobEntry := mustSignedDirectoryEntry(t, bobService.Identity(), true)
+	fakeDirectory := newFakeDirectoryClient(aliceEntry, bobEntry)
+	bobService.SetDirectoryClient(fakeDirectory)
+
+	envelopes, request, err := aliceService.ContactRequestEnvelopes(bobEntry, "hello bob")
+	if err != nil {
+		t.Fatalf("create contact request envelopes: %v", err)
+	}
+	if err := aliceStore.SaveContactRequest(request); err != nil {
+		t.Fatalf("save outgoing request: %v", err)
+	}
+	for idx, envelope := range envelopes {
+		envelope.ID = fmt.Sprintf("request-%d", idx)
+		result, err := bobService.HandleIncoming(envelope)
+		if err != nil {
+			t.Fatalf("handle incoming request: %v", err)
+		}
+		if result == nil || result.ContactRequest == nil {
+			t.Fatalf("expected contact request result, got %+v", result)
+		}
+	}
+	stored, err := bobStore.LoadContactRequest("alice")
+	if err != nil {
+		t.Fatalf("load incoming request: %v", err)
+	}
+	if stored.Direction != store.ContactRequestDirectionIncoming || stored.Status != store.ContactRequestStatusPending || stored.Note != "hello bob" {
+		t.Fatalf("unexpected stored incoming request: %+v", stored)
+	}
+	if _, err := bobStore.LoadContact("alice"); err != store.ErrNotFound {
+		t.Fatalf("expected no contact import before accept, got %v", err)
+	}
+}
+
+func TestHandleIncomingContactRequestResponseAcceptsAndImportsContact(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	aliceEntry := mustSignedDirectoryEntry(t, aliceService.Identity(), true)
+	bobEntry := mustSignedDirectoryEntry(t, bobService.Identity(), true)
+	fakeDirectory := newFakeDirectoryClient(aliceEntry, bobEntry)
+	aliceService.SetDirectoryClient(fakeDirectory)
+	bobService.SetDirectoryClient(fakeDirectory)
+
+	requestEnvelopes, outgoingRequest, err := aliceService.ContactRequestEnvelopes(bobEntry, "")
+	if err != nil {
+		t.Fatalf("create outgoing request envelopes: %v", err)
+	}
+	if err := aliceStore.SaveContactRequest(outgoingRequest); err != nil {
+		t.Fatalf("save outgoing request: %v", err)
+	}
+	for idx, envelope := range requestEnvelopes {
+		envelope.ID = fmt.Sprintf("outgoing-request-%d", idx)
+		if _, err := bobService.HandleIncoming(envelope); err != nil {
+			t.Fatalf("bob handle incoming request: %v", err)
+		}
+	}
+	incomingRequest, err := bobStore.LoadContactRequest("alice")
+	if err != nil {
+		t.Fatalf("load bob incoming request: %v", err)
+	}
+	responseEnvelopes, err := bobService.ContactRequestResponseEnvelopes(incomingRequest.Bundle, contactRequestDecisionAccept)
+	if err != nil {
+		t.Fatalf("create response envelopes: %v", err)
+	}
+	for idx, envelope := range responseEnvelopes {
+		envelope.ID = fmt.Sprintf("accept-response-%d", idx)
+		result, err := aliceService.HandleIncoming(envelope)
+		if err != nil {
+			t.Fatalf("alice handle incoming response: %v", err)
+		}
+		if result == nil || result.ContactRequest == nil || result.ContactRequest.Status != store.ContactRequestStatusAccepted {
+			t.Fatalf("expected accepted contact request result, got %+v", result)
+		}
+	}
+	contact, err := aliceStore.LoadContact("bob")
+	if err != nil {
+		t.Fatalf("load accepted contact: %v", err)
+	}
+	if contact.AccountID != "bob" || !contact.Verified || contact.TrustSource != identity.TrustSourceRelayDirectory {
+		t.Fatalf("unexpected imported contact: %+v", contact)
+	}
+	updatedRequest, err := aliceStore.LoadContactRequest("bob")
+	if err != nil {
+		t.Fatalf("load updated outgoing request: %v", err)
+	}
+	if updatedRequest.Status != store.ContactRequestStatusAccepted {
+		t.Fatalf("expected accepted request status, got %+v", updatedRequest)
+	}
+}
+
+func TestHandleIncomingContactRequestResponseRejectsWithoutImportingContact(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	aliceEntry := mustSignedDirectoryEntry(t, aliceService.Identity(), true)
+	bobEntry := mustSignedDirectoryEntry(t, bobService.Identity(), true)
+	fakeDirectory := newFakeDirectoryClient(aliceEntry, bobEntry)
+	aliceService.SetDirectoryClient(fakeDirectory)
+	bobService.SetDirectoryClient(fakeDirectory)
+
+	_, outgoingRequest, err := aliceService.ContactRequestEnvelopes(bobEntry, "")
+	if err != nil {
+		t.Fatalf("create outgoing request: %v", err)
+	}
+	if err := aliceStore.SaveContactRequest(outgoingRequest); err != nil {
+		t.Fatalf("save outgoing request: %v", err)
+	}
+	responseEnvelopes, err := bobService.ContactRequestResponseEnvelopes(aliceEntry.Entry.Bundle, contactRequestDecisionReject)
+	if err != nil {
+		t.Fatalf("create reject response envelopes: %v", err)
+	}
+	for idx, envelope := range responseEnvelopes {
+		envelope.ID = fmt.Sprintf("reject-response-%d", idx)
+		result, err := aliceService.HandleIncoming(envelope)
+		if err != nil {
+			t.Fatalf("alice handle incoming reject response: %v", err)
+		}
+		if result == nil || result.ContactRequest == nil || result.ContactRequest.Status != store.ContactRequestStatusRejected {
+			t.Fatalf("expected rejected contact request result, got %+v", result)
+		}
+	}
+	if _, err := aliceStore.LoadContact("bob"); err != store.ErrNotFound {
+		t.Fatalf("expected no contact import after rejection, got %v", err)
+	}
+}
+
 func publishDirectoryEntry(t *testing.T, server *httptest.Server, id *identity.Identity) {
 	t.Helper()
 	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "")
 	if err != nil {
 		t.Fatalf("new relay api client: %v", err)
 	}
-	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), Discoverable: true, PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
 	if err != nil {
 		t.Fatalf("sign directory entry: %v", err)
 	}
@@ -900,4 +1052,61 @@ type testWriter struct{}
 
 func (testWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
+}
+
+type fakeDirectoryClient struct {
+	entries map[string]relayapi.SignedDirectoryEntry
+	device  map[string]relayapi.SignedDirectoryEntry
+}
+
+func newFakeDirectoryClient(entries ...*relayapi.SignedDirectoryEntry) *fakeDirectoryClient {
+	client := &fakeDirectoryClient{entries: make(map[string]relayapi.SignedDirectoryEntry), device: make(map[string]relayapi.SignedDirectoryEntry)}
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		client.entries[entry.Entry.Mailbox] = *entry
+		for _, device := range entry.Entry.Bundle.Devices {
+			client.device[device.Mailbox] = *entry
+		}
+	}
+	return client
+}
+
+func (f *fakeDirectoryClient) LookupDirectoryEntry(mailbox string) (*relayapi.SignedDirectoryEntry, error) {
+	entry, ok := f.entries[mailbox]
+	if !ok {
+		return nil, fmt.Errorf("entry %q not found", mailbox)
+	}
+	copyEntry := entry
+	return &copyEntry, nil
+}
+
+func (f *fakeDirectoryClient) LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error) {
+	entry, ok := f.device[mailbox]
+	if !ok {
+		return nil, fmt.Errorf("device %q not found", mailbox)
+	}
+	copyEntry := entry
+	return &copyEntry, nil
+}
+
+func (f *fakeDirectoryClient) ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error) {
+	entries := make([]relayapi.SignedDirectoryEntry, 0, len(f.entries))
+	for _, entry := range f.entries {
+		if !entry.Entry.Discoverable {
+			continue
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+func mustSignedDirectoryEntry(t *testing.T, id *identity.Identity, discoverable bool) *relayapi.SignedDirectoryEntry {
+	t.Helper()
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), Discoverable: discoverable, PublishedAt: time.Now().UTC(), Version: time.Now().UTC().UnixNano()}, id.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	return signed
 }

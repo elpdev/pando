@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/store"
 )
 
 func (s *Service) dispatchIncomingPayload(contact *identity.Contact, body string) (*IncomingResult, bool, error) {
@@ -31,6 +32,10 @@ func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *cont
 		return s.handleContactUpdate(contact, payload)
 	case contentKindDeliveryAck:
 		return s.handleDeliveryAck(contact, payload)
+	case contentKindContactRequest:
+		return s.handleContactRequest(contact, payload)
+	case contentKindContactResponse:
+		return s.handleContactResponse(contact, payload)
 	case contentKindTyping:
 		return s.handleTyping(contact, payload)
 	case contentKindAttachmentChunk:
@@ -38,6 +43,54 @@ func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *cont
 	default:
 		return nil, nil
 	}
+}
+
+func (s *Service) handleContactRequest(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
+	requestPayload, err := s.parseContactRequestPayload(contact, payload)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	request := &store.ContactRequest{
+		AccountID: requestPayload.Bundle.AccountID,
+		Direction: store.ContactRequestDirectionIncoming,
+		Status:    store.ContactRequestStatusPending,
+		Note:      requestPayload.Note,
+		Bundle:    requestPayload.Bundle,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := s.store.SaveContactRequest(request); err != nil {
+		return nil, err
+	}
+	return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, ContactRequest: request}, nil
+}
+
+func (s *Service) handleContactResponse(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
+	response, err := s.parseContactRequestResponsePayload(payload)
+	if err != nil {
+		return nil, err
+	}
+	request, err := s.store.LoadContactRequest(contact.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	request.UpdatedAt = time.Now().UTC()
+	if response.Decision == contactRequestDecisionAccept {
+		request.Status = store.ContactRequestStatusAccepted
+		if response.Bundle == nil {
+			return nil, fmt.Errorf("contact request acceptance bundle is required")
+		}
+		if _, err := s.ImportContactInviteBundle(*response.Bundle, identity.TrustSourceRelayDirectory); err != nil {
+			return nil, err
+		}
+	} else {
+		request.Status = store.ContactRequestStatusRejected
+	}
+	if err := s.store.SaveContactRequest(request); err != nil {
+		return nil, err
+	}
+	return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, ContactRequest: request}, nil
 }
 
 func (s *Service) handleContactUpdate(contact *identity.Contact, payload *contentPayload) (*IncomingResult, error) {
@@ -136,4 +189,29 @@ func (s *Service) parseTypingPayload(payload *contentPayload) (*typingIndicator,
 		return nil, fmt.Errorf("invalid typing state %q", typing.State)
 	}
 	return &typing, nil
+}
+
+func (s *Service) parseContactRequestPayload(contact *identity.Contact, payload *contentPayload) (*contactRequest, error) {
+	if payload == nil || payload.ContactRequest == nil {
+		return nil, fmt.Errorf("contact request payload is required")
+	}
+	request := *payload.ContactRequest
+	if request.Bundle.AccountID == "" {
+		return nil, fmt.Errorf("contact request bundle is required")
+	}
+	if contact.AccountID != request.Bundle.AccountID || contact.Fingerprint() != identity.Fingerprint(request.Bundle.AccountSigningPublic) {
+		return nil, fmt.Errorf("contact request does not match sender identity for account %s", contact.AccountID)
+	}
+	return &request, nil
+}
+
+func (s *Service) parseContactRequestResponsePayload(payload *contentPayload) (*contactRequestResponse, error) {
+	if payload == nil || payload.ContactResponse == nil {
+		return nil, fmt.Errorf("contact request response payload is required")
+	}
+	response := *payload.ContactResponse
+	if response.Decision != contactRequestDecisionAccept && response.Decision != contactRequestDecisionReject {
+		return nil, fmt.Errorf("invalid contact request response decision %q", response.Decision)
+	}
+	return &response, nil
 }

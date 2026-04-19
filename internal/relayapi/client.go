@@ -62,6 +62,22 @@ func (c *Client) LookupDirectoryEntry(mailbox string) (*SignedDirectoryEntry, er
 	return &response, nil
 }
 
+func (c *Client) LookupDirectoryEntryByDeviceMailbox(mailbox string) (*SignedDirectoryEntry, error) {
+	var response SignedDirectoryEntry
+	if err := c.doJSON(http.MethodGet, "/directory/devices/"+url.PathEscape(mailbox), nil, &response); err != nil {
+		return nil, err
+	}
+	return &response, nil
+}
+
+func (c *Client) ListDiscoverableEntries() ([]SignedDirectoryEntry, error) {
+	var response ListDirectoryResponse
+	if err := c.doJSON(http.MethodGet, "/directory/discoverable", nil, &response); err != nil {
+		return nil, err
+	}
+	return response.Entries, nil
+}
+
 func (c *Client) PutRendezvousPayload(id string, payload RendezvousPayload) error {
 	return c.doJSON(http.MethodPut, "/rendezvous/"+url.PathEscape(id), PutRendezvousRequest{Payload: payload}, nil)
 }

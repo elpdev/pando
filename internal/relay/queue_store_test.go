@@ -126,7 +126,7 @@ func TestBoltQueueStorePublishesMailboxOwnershipFromDirectoryEntry(t *testing.T)
 	if err != nil {
 		t.Fatalf("new identity: %v", err)
 	}
-	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), PublishedAt: time.Now().UTC(), Version: 1}, id.AccountSigningPrivate)
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: id.AccountID, Bundle: id.InviteBundle(), Discoverable: true, PublishedAt: time.Now().UTC(), Version: 1}, id.AccountSigningPrivate)
 	if err != nil {
 		t.Fatalf("sign directory entry: %v", err)
 	}
@@ -146,5 +146,19 @@ func TestBoltQueueStorePublishesMailboxOwnershipFromDirectoryEntry(t *testing.T)
 	}
 	if err := store.AuthorizeMailbox(device.Mailbox, device.SigningPublic); err != nil {
 		t.Fatalf("expected published owner to authorize, got %v", err)
+	}
+	entries, err := store.ListDiscoverableEntries()
+	if err != nil {
+		t.Fatalf("list discoverable entries: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Entry.Mailbox != id.AccountID {
+		t.Fatalf("unexpected discoverable entries: %+v", entries)
+	}
+	loaded, err := store.LookupDirectoryEntryByDeviceMailbox(device.Mailbox)
+	if err != nil {
+		t.Fatalf("lookup directory entry by device mailbox: %v", err)
+	}
+	if loaded.Entry.Mailbox != id.AccountID {
+		t.Fatalf("unexpected device mailbox lookup entry: %+v", loaded)
 	}
 }

@@ -2,9 +2,11 @@ package relay
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/elpdev/pando/internal/protocol"
@@ -155,6 +157,38 @@ func (s *BoltQueueStore) LookupMailboxAccount(mailbox string) (string, error) {
 		return "", err
 	}
 	return account, nil
+}
+
+func (s *BoltQueueStore) LookupDirectoryEntryByDeviceMailbox(mailbox string) (*relayapi.SignedDirectoryEntry, error) {
+	account, err := s.LookupMailboxAccount(mailbox)
+	if err != nil {
+		return nil, err
+	}
+	return s.GetDirectoryEntry(account)
+}
+
+func (s *BoltQueueStore) ListDiscoverableEntries() ([]relayapi.SignedDirectoryEntry, error) {
+	entries := make([]relayapi.SignedDirectoryEntry, 0)
+	err := s.db.View(func(tx *bbolt.Tx) error {
+		return tx.Bucket(directoryBucket).ForEach(func(_, value []byte) error {
+			var entry relayapi.SignedDirectoryEntry
+			if err := json.Unmarshal(value, &entry); err != nil {
+				return fmt.Errorf("decode directory entry: %w", err)
+			}
+			if !entry.Entry.Discoverable {
+				return nil
+			}
+			entries = append(entries, entry)
+			return nil
+		})
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Entry.Mailbox < entries[j].Entry.Mailbox
+	})
+	return entries, nil
 }
 
 func (s *BoltQueueStore) PutRendezvousPayload(id string, payload relayapi.RendezvousPayload) error {
