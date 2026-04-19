@@ -50,7 +50,7 @@ func runHelp(args []string) error {
 	case "identity":
 		return fmt.Errorf("usage: pando identity <init|show|invite-code|export-invite> [flags]")
 	case "contact":
-		return fmt.Errorf("usage: pando contact <add|import|list|show|verify> [flags]")
+		return fmt.Errorf("usage: pando contact <add|import|invite|list|lookup|publish-directory|show|verify> [flags]")
 	case "device":
 		return fmt.Errorf("usage: pando device <list|revoke|enroll> [flags]")
 	case "config":

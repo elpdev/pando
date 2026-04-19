@@ -5,16 +5,19 @@ import (
 	"crypto/ed25519"
 	_ "embed"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -49,6 +52,8 @@ type subscriber struct {
 
 const genericClientError = "request rejected"
 const subscribeChallengeTTL = 30 * time.Second
+const rendezvousTTL = 10 * time.Minute
+const maxRendezvousPayloads = 2
 
 func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if queue == nil {
@@ -91,9 +96,118 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc("/logo.webp", s.handleLogo)
 	}
 	mux.HandleFunc("/ws", s.handleWebSocket)
+	mux.HandleFunc("/directory/mailboxes/", s.handleDirectory)
+	mux.HandleFunc("/rendezvous/", s.handleRendezvous)
 	mux.HandleFunc("/up", s.handleHealth)
 	mux.HandleFunc("/healthz", s.handleHealth)
 	return mux
+}
+
+func (s *Server) handleDirectory(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeRequest(w, r) {
+		return
+	}
+	mailbox := strings.TrimPrefix(r.URL.Path, "/directory/mailboxes/")
+	if mailbox == "" || strings.Contains(mailbox, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		entry, err := s.queue.GetDirectoryEntry(mailbox)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				s.writeJSONError(w, http.StatusNotFound, "directory entry not found")
+				return
+			}
+			s.writeJSONError(w, http.StatusInternalServerError, "load directory entry")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, entry)
+	case http.MethodPut:
+		var entry relayapi.SignedDirectoryEntry
+		if err := json.NewDecoder(r.Body).Decode(&entry); err != nil {
+			s.writeJSONError(w, http.StatusBadRequest, "decode directory entry")
+			return
+		}
+		if entry.Entry.Mailbox != mailbox {
+			s.writeJSONError(w, http.StatusBadRequest, "directory mailbox mismatch")
+			return
+		}
+		if err := relayapi.VerifySignedDirectoryEntry(entry); err != nil {
+			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if err := s.queue.PutDirectoryEntry(entry); err != nil {
+			if errors.Is(err, ErrDirectoryConflict) {
+				s.writeJSONError(w, http.StatusConflict, err.Error())
+				return
+			}
+			s.writeJSONError(w, http.StatusInternalServerError, "save directory entry")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, entry)
+	default:
+		w.Header().Set("Allow", "GET, PUT")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+func (s *Server) handleRendezvous(w http.ResponseWriter, r *http.Request) {
+	if !s.authorizeRequest(w, r) {
+		return
+	}
+	id := strings.TrimPrefix(r.URL.Path, "/rendezvous/")
+	if id == "" || strings.Contains(id, "/") {
+		http.NotFound(w, r)
+		return
+	}
+	switch r.Method {
+	case http.MethodGet:
+		payloads, err := s.queue.GetRendezvousPayloads(id, time.Now().UTC())
+		if err != nil {
+			s.writeJSONError(w, http.StatusInternalServerError, "load rendezvous payloads")
+			return
+		}
+		s.writeJSON(w, http.StatusOK, relayapi.GetRendezvousResponse{Payloads: payloads})
+	case http.MethodPut:
+		if !s.limiter.Allow("rendezvous:"+r.RemoteAddr, time.Now().UTC()) {
+			s.writeJSONError(w, http.StatusTooManyRequests, "relay rate limit exceeded")
+			return
+		}
+		var request relayapi.PutRendezvousRequest
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			s.writeJSONError(w, http.StatusBadRequest, "decode rendezvous payload")
+			return
+		}
+		if err := validateRendezvousPayload(request.Payload, time.Now().UTC(), s.options.MaxMessageBytes); err != nil {
+			s.writeJSONError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		existing, err := s.queue.GetRendezvousPayloads(id, time.Now().UTC())
+		if err != nil {
+			s.writeJSONError(w, http.StatusInternalServerError, "load rendezvous payloads")
+			return
+		}
+		if len(existing) >= maxRendezvousPayloads {
+			s.writeJSONError(w, http.StatusConflict, "rendezvous slot is full")
+			return
+		}
+		if err := s.queue.PutRendezvousPayload(id, request.Payload); err != nil {
+			s.writeJSONError(w, http.StatusInternalServerError, "save rendezvous payload")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	case http.MethodDelete:
+		if err := s.queue.DeleteRendezvous(id); err != nil {
+			s.writeJSONError(w, http.StatusInternalServerError, "delete rendezvous payloads")
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	default:
+		w.Header().Set("Allow", "GET, PUT, DELETE")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 func (s *Server) handleLogo(w http.ResponseWriter, _ *http.Request) {
@@ -118,9 +232,16 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	_, _ = w.Write([]byte("ok"))
 }
 
+func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request) bool {
+	if s.options.AuthToken == "" || r.Header.Get(authHeader) == s.options.AuthToken {
+		return true
+	}
+	http.Error(w, "relay auth token is required", http.StatusUnauthorized)
+	return false
+}
+
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	if s.options.AuthToken != "" && r.Header.Get(authHeader) != s.options.AuthToken {
-		http.Error(w, "relay auth token is required", http.StatusUnauthorized)
+	if !s.authorizeRequest(w, r) {
 		return
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
@@ -363,6 +484,43 @@ func (s *Server) writeConn(sub *subscriber, conn *websocket.Conn, msg protocol.M
 		return
 	}
 	s.write(conn, msg)
+}
+
+func (s *Server) writeJSON(w http.ResponseWriter, status int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(value)
+}
+
+func (s *Server) writeJSONError(w http.ResponseWriter, status int, message string) {
+	s.writeJSON(w, status, struct {
+		Message string `json:"message"`
+	}{Message: message})
+}
+
+func validateRendezvousPayload(payload relayapi.RendezvousPayload, now time.Time, maxBytes int) error {
+	if strings.TrimSpace(payload.Ciphertext) == "" {
+		return fmt.Errorf("rendezvous ciphertext is required")
+	}
+	if strings.TrimSpace(payload.Nonce) == "" {
+		return fmt.Errorf("rendezvous nonce is required")
+	}
+	if payload.CreatedAt.IsZero() {
+		return fmt.Errorf("rendezvous created_at is required")
+	}
+	if payload.ExpiresAt.IsZero() {
+		return fmt.Errorf("rendezvous expires_at is required")
+	}
+	if payload.ExpiresAt.After(now.Add(rendezvousTTL)) {
+		return fmt.Errorf("rendezvous expiry exceeds maximum TTL")
+	}
+	if !payload.ExpiresAt.After(now) {
+		return fmt.Errorf("rendezvous payload is already expired")
+	}
+	if len(payload.Ciphertext)+len(payload.Nonce) > maxBytes {
+		return fmt.Errorf("rendezvous payload exceeds relay size limit")
+	}
+	return nil
 }
 
 func (s *Server) ListenAndServe(ctx context.Context, addr string) error {

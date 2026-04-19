@@ -6,12 +6,17 @@ import (
 	"image/color"
 	"image/draw"
 	"image/png"
+	"io"
+	"log/slog"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/relay"
 	"github.com/elpdev/pando/internal/store"
 	"rsc.io/qr"
 )
@@ -403,6 +408,75 @@ func TestRunConfigSetRelayTokenAndShow(t *testing.T) {
 	if !strings.Contains(string(bytes), "relay_token: secret-token") {
 		t.Fatalf("expected relay token in config file, got %q", string(bytes))
 	}
+}
+
+func TestPublishDirectoryAndLookupContact(t *testing.T) {
+	serverURL := newRelayTestServer(t)
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	aliceStore := store.NewClientStore(aliceDir)
+	bobStore := store.NewClientStore(bobDir)
+	if _, _, err := aliceStore.LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("publish directory: %v", err)
+	}
+	if err := runLookupContact([]string{"-mailbox", "bob", "-data-dir", bobDir, "-contact", "alice", "-relay", serverURL, "-relay-token", "secret"}); err != nil {
+		t.Fatalf("lookup contact: %v", err)
+	}
+	contact, err := bobStore.LoadContact("alice")
+	if err != nil {
+		t.Fatalf("load relay directory contact: %v", err)
+	}
+	if !contact.Verified {
+		t.Fatal("expected relay directory contact to be verified")
+	}
+	if contact.TrustSource != identity.TrustSourceRelayDirectory {
+		t.Fatalf("expected relay trust source, got %q", contact.TrustSource)
+	}
+}
+
+func TestContactInviteExchangeAddsTrustedContacts(t *testing.T) {
+	serverURL := newRelayTestServer(t)
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	errs := make(chan error, 1)
+	go func() {
+		errs <- runContactInviteStart([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-code", "12345-67890", "-timeout", "5s"})
+	}()
+	time.Sleep(200 * time.Millisecond)
+	if err := runContactInviteAccept([]string{"-mailbox", "bob", "-data-dir", bobDir, "-relay", serverURL, "-relay-token", "secret", "-code", "12345-67890", "-timeout", "5s"}); err != nil {
+		t.Fatalf("accept invite: %v", err)
+	}
+	if err := <-errs; err != nil {
+		t.Fatalf("start invite: %v", err)
+	}
+	aliceContact, err := store.NewClientStore(aliceDir).LoadContact("bob")
+	if err != nil {
+		t.Fatalf("load alice contact: %v", err)
+	}
+	bobContact, err := store.NewClientStore(bobDir).LoadContact("alice")
+	if err != nil {
+		t.Fatalf("load bob contact: %v", err)
+	}
+	if !aliceContact.Verified || aliceContact.TrustSource != identity.TrustSourceInviteCode {
+		t.Fatalf("unexpected alice invite contact state: %+v", aliceContact)
+	}
+	if !bobContact.Verified || bobContact.TrustSource != identity.TrustSourceInviteCode {
+		t.Fatalf("unexpected bob invite contact state: %+v", bobContact)
+	}
+}
+
+func newRelayTestServer(t *testing.T) string {
+	t.Helper()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	server := httptest.NewServer(relay.NewServer(logger, relay.NewMemoryQueueStore(), relay.Options{AuthToken: "secret"}).Handler())
+	t.Cleanup(server.Close)
+	return "ws" + strings.TrimPrefix(server.URL, "http") + "/ws"
 }
 
 func withPatchedStdin(t *testing.T, input string, fn func()) {

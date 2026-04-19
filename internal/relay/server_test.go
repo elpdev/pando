@@ -3,7 +3,9 @@ package relay
 import (
 	"crypto/ed25519"
 	"encoding/base64"
+	"encoding/json"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/gorilla/websocket"
 )
 
@@ -234,6 +237,80 @@ func TestSubscribeRejectsInvalidAttemptWithoutClaimingMailbox(t *testing.T) {
 	msg = readMessage(t, conn)
 	if msg.Type != protocol.MessageTypeAck {
 		t.Fatalf("expected mailbox to remain claimable after failed attempt, got %+v", msg)
+	}
+}
+
+func TestDirectoryEntryRoundTripOverHTTP(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+	alice := mustIdentity(t, "alice")
+	client, err := relayapi.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "secret")
+	if err != nil {
+		t.Fatalf("new relay api client: %v", err)
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{Mailbox: "alice", Bundle: alice.InviteBundle(), PublishedAt: time.Now().UTC(), Version: 1}, alice.AccountSigningPrivate)
+	if err != nil {
+		t.Fatalf("sign directory entry: %v", err)
+	}
+	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
+		t.Fatalf("publish directory entry: %v", err)
+	}
+	loaded, err := client.LookupDirectoryEntry("alice")
+	if err != nil {
+		t.Fatalf("lookup directory entry: %v", err)
+	}
+	if err := relayapi.VerifySignedDirectoryEntry(*loaded); err != nil {
+		t.Fatalf("verify signed directory entry: %v", err)
+	}
+	if loaded.Entry.Bundle.AccountID != "alice" {
+		t.Fatalf("expected alice directory entry, got %+v", loaded)
+	}
+}
+
+func TestRendezvousPayloadRoundTripOverHTTP(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(testWriter{t: t}, nil))
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+	baseURL := strings.TrimRight(server.URL, "/")
+	payload := relayapi.PutRendezvousRequest{Payload: relayapi.RendezvousPayload{Ciphertext: base64.StdEncoding.EncodeToString([]byte("ciphertext")), Nonce: base64.StdEncoding.EncodeToString([]byte("0123456789ab")), CreatedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Minute)}}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPut, baseURL+"/rendezvous/test-room", strings.NewReader(string(body)))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	req.Header.Set(authHeader, "secret")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("put rendezvous payload: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("expected no content, got %s", resp.Status)
+	}
+	getReq, err := http.NewRequest(http.MethodGet, baseURL+"/rendezvous/test-room", nil)
+	if err != nil {
+		t.Fatalf("build get request: %v", err)
+	}
+	getReq.Header.Set(authHeader, "secret")
+	getResp, err := http.DefaultClient.Do(getReq)
+	if err != nil {
+		t.Fatalf("get rendezvous payload: %v", err)
+	}
+	defer getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected ok, got %s", getResp.Status)
+	}
+	var response relayapi.GetRendezvousResponse
+	if err := json.NewDecoder(getResp.Body).Decode(&response); err != nil {
+		t.Fatalf("decode rendezvous response: %v", err)
+	}
+	if len(response.Payloads) != 1 {
+		t.Fatalf("expected one payload, got %+v", response.Payloads)
 	}
 }
 

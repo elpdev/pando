@@ -34,6 +34,7 @@ type contactItem struct {
 	Mailbox     string
 	Fingerprint string
 	Verified    bool
+	TrustSource string
 }
 
 // messageItem is one rendered chat message. We keep these as structured records
@@ -89,6 +90,7 @@ type Model struct {
 	reconnectDelay      time.Duration
 	peerFingerprint     string
 	peerVerified        bool
+	peerTrustSource     string
 	peerTyping          bool
 	peerTypingExpiresAt time.Time
 	typingSpinner       spinner.Model
@@ -772,6 +774,7 @@ func (m *Model) loadContacts(initialMailbox string) {
 			Mailbox:     contact.AccountID,
 			Fingerprint: contact.Fingerprint(),
 			Verified:    contact.Verified,
+			TrustSource: contact.TrustSource,
 		})
 	}
 	m.selectedIndex = -1
@@ -1182,6 +1185,7 @@ func attachmentBodyPattern(body string) bool {
 func (m *Model) syncRecipientDetails() {
 	m.peerFingerprint = "unknown"
 	m.peerVerified = false
+	m.peerTrustSource = identity.TrustSourceUnverified
 	if m.recipientMailbox == "" {
 		return
 	}
@@ -1190,11 +1194,13 @@ func (m *Model) syncRecipientDetails() {
 		if stored, err := m.messaging.Contact(m.recipientMailbox); err == nil {
 			m.peerFingerprint = stored.Fingerprint()
 			m.peerVerified = stored.Verified
+			m.peerTrustSource = stored.TrustSource
 		}
 		return
 	}
 	m.peerFingerprint = contact.Fingerprint
 	m.peerVerified = contact.Verified
+	m.peerTrustSource = contact.TrustSource
 }
 
 func (m *Model) syncInputPlaceholder() {
@@ -1287,10 +1293,12 @@ func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
 
 	// Verification label on the right.
 	statusStyle := style.UnverifiedWarn
-	statusText := "unverified"
+	statusText := identity.TrustLabel(contact.TrustSource, contact.Verified)
 	if contact.Verified {
 		statusStyle = style.VerifiedOk
-		statusText = "verified"
+	}
+	if contact.TrustSource == identity.TrustSourceUnverified {
+		statusStyle = style.UnverifiedWarn
 	}
 
 	return fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, statusStyle.Render(statusText))
@@ -1524,9 +1532,10 @@ func (m *Model) renderPeerDetailModal(base string) string {
 
 	mailboxLine := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
 
-	verifyLine := style.UnverifiedWarn.Render("unverified")
+	verifyLabel := identity.TrustLabel(m.peerTrustSource, m.peerVerified)
+	verifyLine := style.UnverifiedWarn.Render(verifyLabel)
 	if m.peerVerified {
-		verifyLine = style.VerifiedOk.Render("verified")
+		verifyLine = style.VerifiedOk.Render(verifyLabel)
 	}
 
 	fullFp := m.peerFingerprint
@@ -1613,9 +1622,10 @@ func (m *Model) upsertContact(contact *identity.Contact) {
 		}
 		m.contacts[idx].Fingerprint = contact.Fingerprint()
 		m.contacts[idx].Verified = contact.Verified
+		m.contacts[idx].TrustSource = contact.TrustSource
 		return
 	}
-	m.contacts = append(m.contacts, contactItem{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified})
+	m.contacts = append(m.contacts, contactItem{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, TrustSource: contact.TrustSource})
 	if m.selectedIndex == -1 {
 		m.selectedIndex = len(m.contacts) - 1
 	}
@@ -1630,11 +1640,8 @@ func (m *Model) findContact(mailbox string) *contactItem {
 	return nil
 }
 
-func verificationLabel(verified bool) string {
-	if verified {
-		return "verified"
-	}
-	return "unverified"
+func verificationLabel(verified bool, trustSource string) string {
+	return identity.TrustLabel(trustSource, verified)
 }
 
 func (m *Model) handleAuthFailure(err error) {
