@@ -294,6 +294,62 @@ func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	}
 }
 
+func TestHandleIncomingAttachmentChunkRejectsOversizedTransfer(t *testing.T) {
+	service, _, err := New(store.NewClientStore(t.TempDir()), "bob")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	_, _, err = service.handleIncomingAttachmentChunk("alice", &attachmentChunkPayload{
+		AttachmentType: attachmentTypePhoto,
+		AttachmentID:   "photo-1",
+		Filename:       "photo.png",
+		MIMEType:       "image/png",
+		TotalSize:      maxAttachmentSizeBytes + 1,
+		ChunkIndex:     0,
+		ChunkCount:     1,
+		Data:           base64.StdEncoding.EncodeToString([]byte("chunk")),
+	})
+	if err == nil {
+		t.Fatal("expected oversized attachment to be rejected")
+	}
+}
+
+func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
+	service, _, err := New(store.NewClientStore(t.TempDir()), "bob")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	service.incomingAttachments = map[string]*incomingAttachment{
+		"alice:stale": {
+			attachmentType: attachmentTypePhoto,
+			filename:       "stale.png",
+			totalSize:      4,
+			chunkCount:     1,
+			chunks:         make([][]byte, 1),
+			updatedAt:      time.Now().UTC().Add(-incomingAttachmentTTL - time.Minute),
+		},
+	}
+	_, done, err := service.handleIncomingAttachmentChunk("alice", &attachmentChunkPayload{
+		AttachmentType: attachmentTypePhoto,
+		AttachmentID:   "fresh",
+		Filename:       "photo.png",
+		MIMEType:       "image/png",
+		TotalSize:      5,
+		ChunkIndex:     0,
+		ChunkCount:     1,
+		Data:           base64.StdEncoding.EncodeToString([]byte("hello")),
+	})
+	if err != nil {
+		t.Fatalf("handle incoming fresh chunk: %v", err)
+	}
+	if !done {
+		t.Fatal("expected single-chunk attachment to complete")
+	}
+	if _, ok := service.incomingAttachments["alice:stale"]; ok {
+		t.Fatal("expected stale transfer to be removed")
+	}
+}
+
 func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
 	defer server.Close()
@@ -334,13 +390,13 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "alice")
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
 	defer aliceClient.Close()
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
 	awaitSubscribeAck(t, aliceClient.Events())
-	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "bob")
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)
@@ -570,13 +626,13 @@ func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "alice")
+	aliceClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceService.Identity())
 	defer aliceClient.Close()
 	if err := aliceClient.Connect(ctx); err != nil {
 		t.Fatalf("connect alice client: %v", err)
 	}
 	awaitSubscribeAck(t, aliceClient.Events())
-	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", "bob")
+	bobClient := wsclient.NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", bobService.Identity())
 	defer bobClient.Close()
 	if err := bobClient.Connect(ctx); err != nil {
 		t.Fatalf("connect bob client: %v", err)

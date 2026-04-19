@@ -79,7 +79,10 @@ func TestDefaultRelayAppliesEnvironmentOverrides(t *testing.T) {
 	t.Setenv("PANDO_RELAY_AUTH_TOKEN", "secret-token")
 	t.Setenv("PANDO_RELAY_QUEUE_TTL", "48h")
 	t.Setenv("PANDO_RELAY_MAX_MESSAGE_BYTES", "12345")
+	t.Setenv("PANDO_RELAY_MAX_QUEUED_MESSAGES", "42")
+	t.Setenv("PANDO_RELAY_MAX_QUEUED_BYTES", "9999")
 	t.Setenv("PANDO_RELAY_RATE_LIMIT_PER_MINUTE", "77")
+	t.Setenv("PANDO_RELAY_ALLOWED_ORIGINS", "https://app.example, https://admin.example")
 
 	if err := ApplyRelayEnv(&cfg); err != nil {
 		t.Fatalf("apply relay env: %v", err)
@@ -100,8 +103,17 @@ func TestDefaultRelayAppliesEnvironmentOverrides(t *testing.T) {
 	if cfg.MaxMessageBytes != 12345 {
 		t.Fatalf("expected max message bytes override, got %d", cfg.MaxMessageBytes)
 	}
+	if cfg.MaxQueuedMessages != 42 {
+		t.Fatalf("expected max queued messages override, got %d", cfg.MaxQueuedMessages)
+	}
+	if cfg.MaxQueuedBytes != 9999 {
+		t.Fatalf("expected max queued bytes override, got %d", cfg.MaxQueuedBytes)
+	}
 	if cfg.RateLimitPerMinute != 77 {
 		t.Fatalf("expected rate limit override, got %d", cfg.RateLimitPerMinute)
+	}
+	if len(cfg.AllowedOrigins) != 2 || cfg.AllowedOrigins[0] != "https://app.example" || cfg.AllowedOrigins[1] != "https://admin.example" {
+		t.Fatalf("expected allowed origins override, got %v", cfg.AllowedOrigins)
 	}
 }
 
@@ -126,6 +138,8 @@ func TestApplyRelayEnvRejectsInvalidIntegerEnvironmentOverrides(t *testing.T) {
 		prefix string
 	}{
 		{name: "max message bytes", envKey: "PANDO_RELAY_MAX_MESSAGE_BYTES", envVal: "abc", prefix: "invalid PANDO_RELAY_MAX_MESSAGE_BYTES \"abc\":"},
+		{name: "max queued messages", envKey: "PANDO_RELAY_MAX_QUEUED_MESSAGES", envVal: "xyz", prefix: "invalid PANDO_RELAY_MAX_QUEUED_MESSAGES \"xyz\":"},
+		{name: "max queued bytes", envKey: "PANDO_RELAY_MAX_QUEUED_BYTES", envVal: "xyz", prefix: "invalid PANDO_RELAY_MAX_QUEUED_BYTES \"xyz\":"},
 		{name: "rate limit", envKey: "PANDO_RELAY_RATE_LIMIT_PER_MINUTE", envVal: "xyz", prefix: "invalid PANDO_RELAY_RATE_LIMIT_PER_MINUTE \"xyz\":"},
 	}
 

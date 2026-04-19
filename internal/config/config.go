@@ -32,8 +32,11 @@ type Relay struct {
 	StorePath          string
 	QueueTTL           time.Duration
 	MaxMessageBytes    int
+	MaxQueuedMessages  int
+	MaxQueuedBytes     int
 	RateLimitPerMinute int
 	AuthToken          string
+	AllowedOrigins     []string
 }
 
 func DefaultClient() Client {
@@ -46,6 +49,8 @@ func DefaultRelay() Relay {
 		RootDir:            DefaultRootDir(),
 		QueueTTL:           24 * time.Hour,
 		MaxMessageBytes:    64 * 1024,
+		MaxQueuedMessages:  512,
+		MaxQueuedBytes:     16 * 1024 * 1024,
 		RateLimitPerMinute: 120,
 	}
 }
@@ -75,6 +80,12 @@ func (r Relay) Validate() error {
 	}
 	if r.MaxMessageBytes <= 0 {
 		return fmt.Errorf("relay max message bytes must be positive")
+	}
+	if r.MaxQueuedMessages <= 0 {
+		return fmt.Errorf("relay max queued messages must be positive")
+	}
+	if r.MaxQueuedBytes <= 0 {
+		return fmt.Errorf("relay max queued bytes must be positive")
 	}
 	if r.RateLimitPerMinute <= 0 {
 		return fmt.Errorf("relay rate limit per minute must be positive")
@@ -122,6 +133,20 @@ func ApplyRelayEnv(cfg *Relay) error {
 		}
 		cfg.MaxMessageBytes = parsed
 	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_MAX_QUEUED_MESSAGES"); ok {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_MAX_QUEUED_MESSAGES %q: %w", value, err)
+		}
+		cfg.MaxQueuedMessages = parsed
+	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_MAX_QUEUED_BYTES"); ok {
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return fmt.Errorf("invalid PANDO_RELAY_MAX_QUEUED_BYTES %q: %w", value, err)
+		}
+		cfg.MaxQueuedBytes = parsed
+	}
 	if value, ok := lookupEnvTrimmed("PANDO_RELAY_RATE_LIMIT_PER_MINUTE"); ok {
 		parsed, err := strconv.Atoi(value)
 		if err != nil {
@@ -129,7 +154,23 @@ func ApplyRelayEnv(cfg *Relay) error {
 		}
 		cfg.RateLimitPerMinute = parsed
 	}
+	if value, ok := lookupEnvTrimmed("PANDO_RELAY_ALLOWED_ORIGINS"); ok {
+		cfg.AllowedOrigins = splitCommaList(value)
+	}
 	return nil
+}
+
+func splitCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed == "" {
+			continue
+		}
+		result = append(result, trimmed)
+	}
+	return result
 }
 
 // DeviceConfig holds optional device-wide defaults stored in config.yml.

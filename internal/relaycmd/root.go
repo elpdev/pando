@@ -25,6 +25,8 @@ func Execute(args []string) error {
 	fs.StringVar(&cfg.StorePath, "store", cfg.StorePath, "path to relay queue store")
 	fs.DurationVar(&cfg.QueueTTL, "ttl", cfg.QueueTTL, "offline message retention TTL")
 	fs.IntVar(&cfg.MaxMessageBytes, "max-message-bytes", cfg.MaxMessageBytes, "maximum accepted message payload size")
+	fs.IntVar(&cfg.MaxQueuedMessages, "max-queued-messages", cfg.MaxQueuedMessages, "maximum queued messages per mailbox")
+	fs.IntVar(&cfg.MaxQueuedBytes, "max-queued-bytes", cfg.MaxQueuedBytes, "maximum queued payload bytes per mailbox")
 	fs.IntVar(&cfg.RateLimitPerMinute, "rate-limit-per-minute", cfg.RateLimitPerMinute, "maximum publishes per sender mailbox per minute")
 	fs.StringVar(&cfg.AuthToken, "auth-token", cfg.AuthToken, "optional shared token required for relay websocket access")
 
@@ -46,8 +48,11 @@ func Execute(args []string) error {
 	server := relay.NewServer(logger, queueStore, relay.Options{
 		QueueTTL:           cfg.QueueTTL,
 		MaxMessageBytes:    cfg.MaxMessageBytes,
+		MaxQueuedMessages:  cfg.MaxQueuedMessages,
+		MaxQueuedBytes:     cfg.MaxQueuedBytes,
 		RateLimitPerMinute: cfg.RateLimitPerMinute,
 		AuthToken:          cfg.AuthToken,
+		AllowedOrigins:     cfg.AllowedOrigins,
 	})
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

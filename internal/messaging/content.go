@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -13,15 +14,19 @@ import (
 const (
 	contentKindText            = "text"
 	contentKindAttachmentChunk = "attachment-chunk"
+	contentKindDeliveryAck     = "delivery-ack"
 	attachmentTypePhoto        = "photo"
 	attachmentTypeVoice        = "voice"
 	attachmentChunkSizeBytes   = 8 * 1024
+	maxAttachmentSizeBytes     = 50 * 1024 * 1024
+	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
 )
 
 type contentPayload struct {
 	Kind            string                  `json:"kind"`
 	Text            string                  `json:"text,omitempty"`
 	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
+	DeliveryAck     *deliveryAck            `json:"delivery_ack,omitempty"`
 }
 
 type attachmentChunkPayload struct {
@@ -43,6 +48,7 @@ type incomingAttachment struct {
 	chunkCount     int
 	chunks         [][]byte
 	received       int
+	updatedAt      time.Time
 }
 
 func decodeContentPayload(body string) (*contentPayload, bool, error) {
@@ -57,10 +63,16 @@ func decodeContentPayload(body string) (*contentPayload, bool, error) {
 }
 
 func buildAttachmentChunkPayloads(attachmentType, filename, mimeType string, bytes []byte) ([]string, string, error) {
+	if len(bytes) > maxAttachmentSizeBytes {
+		return nil, "", fmt.Errorf("%s exceeds attachment size limit of %d bytes", attachmentLabel(attachmentType), maxAttachmentSizeBytes)
+	}
 	attachmentID := uuid.NewString()
 	chunkCount := (len(bytes) + attachmentChunkSizeBytes - 1) / attachmentChunkSizeBytes
 	if chunkCount == 0 {
 		chunkCount = 1
+	}
+	if chunkCount > maxAttachmentChunkCount {
+		return nil, "", fmt.Errorf("%s exceeds attachment chunk limit", attachmentLabel(attachmentType))
 	}
 	payloads := make([]string, 0, chunkCount)
 	for chunkIndex := 0; chunkIndex < chunkCount; chunkIndex++ {

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -27,5 +28,20 @@ func TestEncryptedHistoryRoundTrip(t *testing.T) {
 	}
 	if records[0].Body != record.Body || records[0].Direction != record.Direction {
 		t.Fatalf("unexpected record: %+v", records[0])
+	}
+}
+
+func TestAppendHistoryRejectsPathTraversalMailbox(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	err = clientStore.AppendHistory(id, MessageRecord{PeerMailbox: "../bob", Direction: "outbound", Body: "hello", Timestamp: time.Now().UTC()})
+	if err == nil {
+		t.Fatal("expected traversal mailbox to be rejected")
+	}
+	if !strings.Contains(err.Error(), "invalid mailbox") {
+		t.Fatalf("expected invalid mailbox error, got %v", err)
 	}
 }

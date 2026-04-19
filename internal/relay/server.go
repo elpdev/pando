@@ -1,12 +1,17 @@
 package relay
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
 	_ "embed"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"html/template"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"sync"
 	"time"
 
@@ -43,6 +48,8 @@ type subscriber struct {
 	mu      sync.Mutex
 }
 
+const genericClientError = "request rejected"
+
 func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if queue == nil {
 		queue = NewMemoryQueueStore()
@@ -53,20 +60,28 @@ func NewServer(logger *slog.Logger, queue QueueStore, options Options) *Server {
 	if options.MaxMessageBytes <= 0 {
 		options.MaxMessageBytes = 64 * 1024
 	}
+	if options.MaxQueuedMessages <= 0 {
+		options.MaxQueuedMessages = 512
+	}
+	if options.MaxQueuedBytes <= 0 {
+		options.MaxQueuedBytes = 16 * 1024 * 1024
+	}
 	if options.RateLimitPerMinute <= 0 {
 		options.RateLimitPerMinute = 120
 	}
-	return &Server{
-		logger:  logger,
-		queue:   queue,
-		options: options,
-		limiter: newRateLimiter(options.RateLimitPerMinute),
-		landing: template.Must(template.New("landing").Parse(landingHTML)),
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(*http.Request) bool { return true },
-		},
+	if configurable, ok := queue.(interface{ SetLimits(QueueLimits) }); ok {
+		configurable.SetLimits(QueueLimits{MaxMessages: options.MaxQueuedMessages, MaxBytes: options.MaxQueuedBytes})
+	}
+	server := &Server{
+		logger:    logger,
+		queue:     queue,
+		options:   options,
+		limiter:   newRateLimiter(options.RateLimitPerMinute),
+		landing:   template.Must(template.New("landing").Parse(landingHTML)),
 		mailboxes: make(map[string]*mailbox),
 	}
+	server.upgrader = websocket.Upgrader{CheckOrigin: server.checkOrigin}
+	return server
 }
 
 func (s *Server) Handler() http.Handler {
@@ -121,20 +136,28 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			if current != nil {
 				s.unregister(current)
 			}
-			s.logger.Info("client disconnected", "error", err)
+			s.logger.Info("client disconnected")
 			return
 		}
 
 		if err := msg.Validate(); err != nil {
-			s.writeConn(current, conn, protocol.Message{
-				Type:  protocol.MessageTypeError,
-				Error: &protocol.Error{Message: err.Error()},
-			})
+			s.logger.Warn("reject invalid websocket message", "error", err)
+			s.writeClientError(current, conn, genericClientError)
 			continue
 		}
 
 		switch msg.Type {
 		case protocol.MessageTypeSubscribe:
+			now := time.Now().UTC()
+			if !s.limiter.Allow("subscribe:"+r.RemoteAddr, now) {
+				s.writeClientError(current, conn, "relay rate limit exceeded")
+				continue
+			}
+			if err := s.verifySubscribeRequest(*msg.Subscribe); err != nil {
+				s.logger.Warn("reject subscribe request", "mailbox", msg.Subscribe.Mailbox, "error", err)
+				s.writeClientError(current, conn, genericClientError)
+				continue
+			}
 			if current != nil {
 				s.unregister(current)
 			}
@@ -142,7 +165,8 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			current = &subscriber{conn: conn, mailbox: msg.Subscribe.Mailbox}
 			backlog, err := s.register(current)
 			if err != nil {
-				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				s.logger.Warn("register subscriber", "mailbox", msg.Subscribe.Mailbox, "error", err)
+				s.writeClientError(current, conn, genericClientError)
 				continue
 			}
 			s.writeSubscriber(current, protocol.Message{
@@ -156,18 +180,24 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			envelope := msg.Publish.Envelope
 			now := time.Now().UTC()
 			if err := validateEnvelopeLimits(envelope, s.options); err != nil {
-				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				s.logger.Warn("reject oversized envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+				s.writeClientError(current, conn, genericClientError)
 				continue
 			}
 			if !s.limiter.Allow(envelope.SenderMailbox, now) {
-				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: "relay rate limit exceeded for sender mailbox"}})
+				s.writeClientError(current, conn, "relay rate limit exceeded")
 				continue
 			}
 			envelope.ID = uuid.NewString()
 			envelope.Timestamp = now
 			envelope.ExpiresAt = now.Add(s.options.QueueTTL)
 			if err := s.publish(envelope); err != nil {
-				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: err.Error()}})
+				if errors.Is(err, ErrQueueFull) {
+					s.writeClientError(current, conn, "mailbox queue is full")
+					continue
+				}
+				s.logger.Warn("publish envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+				s.writeClientError(current, conn, genericClientError)
 				continue
 			}
 			s.writeConn(current, conn, protocol.Message{
@@ -176,6 +206,34 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+}
+
+func (s *Server) verifySubscribeRequest(req protocol.SubscribeRequest) error {
+	signingPublic, err := base64.StdEncoding.DecodeString(req.DeviceSigningKey)
+	if err != nil {
+		return fmt.Errorf("decode device signing key: %w", err)
+	}
+	if len(signingPublic) != ed25519.PublicKeySize {
+		return fmt.Errorf("invalid device signing key length")
+	}
+	proof, err := base64.StdEncoding.DecodeString(req.DeviceProof)
+	if err != nil {
+		return fmt.Errorf("decode device proof: %w", err)
+	}
+	if !ed25519.Verify(ed25519.PublicKey(signingPublic), protocol.SubscribeProofBytes(req.Mailbox), proof) {
+		return fmt.Errorf("invalid device proof")
+	}
+	owner, err := s.queue.MailboxOwner(req.Mailbox)
+	if err != nil {
+		return fmt.Errorf("load mailbox owner: %w", err)
+	}
+	if len(owner) != 0 && !bytes.Equal(owner, signingPublic) {
+		return ErrMailboxClaimConflict
+	}
+	if err := s.queue.ClaimMailbox(req.Mailbox, signingPublic); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Server) register(sub *subscriber) ([]protocol.Envelope, error) {
@@ -241,16 +299,46 @@ func (s *Server) getMailboxLocked(name string) *mailbox {
 }
 
 func (s *Server) write(conn *websocket.Conn, msg protocol.Message) {
+	if conn == nil {
+		return
+	}
 	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := conn.WriteJSON(msg); err != nil {
-		s.logger.Info("write websocket message", "error", err)
+		s.logger.Info("write websocket message")
 	}
 }
 
 func (s *Server) writeSubscriber(sub *subscriber, msg protocol.Message) {
 	sub.mu.Lock()
 	defer sub.mu.Unlock()
+	if sub.conn == nil {
+		return
+	}
 	s.write(sub.conn, msg)
+}
+
+func (s *Server) writeClientError(sub *subscriber, conn *websocket.Conn, message string) {
+	s.writeConn(sub, conn, protocol.Message{Type: protocol.MessageTypeError, Error: &protocol.Error{Message: message}})
+}
+
+func (s *Server) checkOrigin(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return true
+	}
+	parsedOrigin, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+	if len(s.options.AllowedOrigins) != 0 {
+		for _, allowed := range s.options.AllowedOrigins {
+			if origin == allowed {
+				return true
+			}
+		}
+		return false
+	}
+	return parsedOrigin.Host == r.Host
 }
 
 func (s *Server) writeConn(sub *subscriber, conn *websocket.Conn, msg protocol.Message) {
