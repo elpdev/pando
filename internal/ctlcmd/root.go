@@ -649,13 +649,15 @@ func resolveDataDir(mailbox, rootDir, dataDir string) (string, error) {
 
 func runConfig(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pandoctl config <show|set-relay|set-mailbox> [flags]")
+		return fmt.Errorf("usage: pandoctl config <show|set-relay|set-relay-token|set-mailbox> [flags]")
 	}
 	switch args[0] {
 	case "show":
 		return runConfigShow(args[1:])
 	case "set-relay":
 		return runConfigSetRelay(args[1:])
+	case "set-relay-token":
+		return runConfigSetRelayToken(args[1:])
 	case "set-mailbox":
 		return runConfigSetMailbox(args[1:])
 	default:
@@ -676,6 +678,7 @@ func runConfigShow(args []string) error {
 	}
 	fmt.Printf("config file: %s\n", config.DeviceConfigPath(*rootDir))
 	fmt.Printf("relay_url: %s\n", devCfg.RelayURL)
+	fmt.Printf("relay_token: %s\n", devCfg.RelayToken)
 	fmt.Printf("default_mailbox: %s\n", devCfg.DefaultMailbox)
 	return nil
 }
@@ -699,6 +702,28 @@ func runConfigSetRelay(args []string) error {
 		return err
 	}
 	fmt.Printf("relay_url set to %s\n", devCfg.RelayURL)
+	return nil
+}
+
+func runConfigSetRelayToken(args []string) error {
+	fs := flag.NewFlagSet("config set-relay-token", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: pandoctl config set-relay-token <token>")
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	devCfg.RelayToken = fs.Arg(0)
+	if err := config.SaveDeviceConfig(*rootDir, devCfg); err != nil {
+		return err
+	}
+	fmt.Printf("relay_token set to %s\n", devCfg.RelayToken)
 	return nil
 }
 

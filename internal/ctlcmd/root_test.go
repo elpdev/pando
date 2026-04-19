@@ -282,6 +282,36 @@ func TestReadInviteBundleFromQRImage(t *testing.T) {
 	}
 }
 
+func TestRunConfigSetRelayTokenAndShow(t *testing.T) {
+	rootDir := t.TempDir()
+
+	setOutput := captureStdout(t, func() {
+		if err := runConfigSetRelayToken([]string{"-root-dir", rootDir, "secret-token"}); err != nil {
+			t.Fatalf("set relay token: %v", err)
+		}
+	})
+	if !strings.Contains(setOutput, "relay_token set to secret-token") {
+		t.Fatalf("expected relay token confirmation, got %q", setOutput)
+	}
+
+	showOutput := captureStdout(t, func() {
+		if err := runConfigShow([]string{"-root-dir", rootDir}); err != nil {
+			t.Fatalf("show config: %v", err)
+		}
+	})
+	if !strings.Contains(showOutput, "relay_token: secret-token") {
+		t.Fatalf("expected relay token in config output, got %q", showOutput)
+	}
+
+	bytes, err := os.ReadFile(filepath.Join(rootDir, "config.yml"))
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	if !strings.Contains(string(bytes), "relay_token: secret-token") {
+		t.Fatalf("expected relay token in config file, got %q", string(bytes))
+	}
+}
+
 func withPatchedStdin(t *testing.T, input string, fn func()) {
 	t.Helper()
 	origStdin := os.Stdin

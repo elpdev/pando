@@ -1,7 +1,9 @@
 package config
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -32,6 +34,33 @@ func TestClientValidateAllowsEmptyRecipientMailbox(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("validate client config: %v", err)
+	}
+}
+
+func TestDeviceConfigRoundTripIncludesRelayToken(t *testing.T) {
+	rootDir := t.TempDir()
+	want := DeviceConfig{
+		RelayURL:       "wss://relay.example/ws",
+		RelayToken:     "secret-token",
+		DefaultMailbox: "alice",
+	}
+	if err := SaveDeviceConfig(rootDir, want); err != nil {
+		t.Fatalf("save device config: %v", err)
+	}
+	got, err := LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	if got != want {
+		t.Fatalf("expected device config %+v, got %+v", want, got)
+	}
+	path := DeviceConfigPath(rootDir)
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read config file: %v", err)
+	}
+	if !strings.Contains(string(bytes), "relay_token: secret-token") {
+		t.Fatalf("expected relay_token in config file, got %q", string(bytes))
 	}
 }
 

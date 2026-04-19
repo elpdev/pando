@@ -135,6 +135,7 @@ func ApplyRelayEnv(cfg *Relay) error {
 // DeviceConfig holds optional device-wide defaults stored in config.yml.
 type DeviceConfig struct {
 	RelayURL       string `yaml:"relay_url,omitempty"`
+	RelayToken     string `yaml:"relay_token,omitempty"`
 	DefaultMailbox string `yaml:"default_mailbox,omitempty"`
 }
 

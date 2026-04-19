@@ -28,6 +28,9 @@ func Execute(args []string) error {
 	if devCfg.RelayURL != "" {
 		cfg.RelayURL = devCfg.RelayURL
 	}
+	if devCfg.RelayToken != "" {
+		cfg.RelayToken = devCfg.RelayToken
+	}
 	if devCfg.DefaultMailbox != "" {
 		cfg.Mailbox = devCfg.DefaultMailbox
 	}
