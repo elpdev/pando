@@ -101,12 +101,30 @@ type Model struct {
 	addContactError     string
 	addContactImporting bool
 	addContactOpen      bool
+	helpOpen            bool
+	focus               focusState
+	pendingIncoming     int
 	unread              map[string]int
 	toast               *toastState
 	width               int
 	height              int
 	sidebarWidth        int
 }
+
+// focusState tracks which pane owns keyboard input. In wide mode both panes
+// are visible and focus only decorates borders + directs ↑/↓; in narrow mode
+// only the focused pane renders.
+type focusState int
+
+const (
+	focusChat    focusState = iota // input + viewport + conversation
+	focusSidebar                   // contact list
+)
+
+// narrowThreshold is the terminal width below which the sidebar and
+// conversation can't coexist comfortably. Below this, only the focused pane
+// renders.
+const narrowThreshold = 60
 
 // ConnState is the coarse connection state used by the app header to pick a
 // glyph and color. Call ConnectionState() to read it.
@@ -214,11 +232,28 @@ func (m *Model) SetSize(width, height int) {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		if m.helpOpen {
+			return m.handleHelpKey(msg)
+		}
 		if m.filePickerOpen {
 			return m, m.updateFilePicker(msg)
 		}
 		if m.addContactOpen {
 			return m.handleAddContactKey(msg)
+		}
+		// Help and focus-switching live above the input so `?` always works
+		// (including while typing) and `tab` doesn't get eaten by textinput.
+		if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
+			m.helpOpen = true
+			return m, nil
+		}
+		if msg.Type == tea.KeyTab {
+			m.toggleFocus()
+			return m, nil
+		}
+		if msg.Type == tea.KeyEnd || (msg.Type == tea.KeyRunes && string(msg.Runes) == "G" && m.input.Value() == "") {
+			m.jumpToLatest()
+			return m, nil
 		}
 		if msg.Type == tea.KeyCtrlN {
 			m.openAddContactModal()
@@ -294,7 +329,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			})
 			m.input.SetValue("")
 			m.resetLocalTypingState()
-			m.syncViewport()
+			m.syncViewportToBottom()
 			return m, m.sendCmd(m.recipientMailbox, body, batch)
 		}
 	case clientEventMsg:
@@ -403,13 +438,27 @@ func (m *Model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
-	left := m.renderSidebar()
-	right := m.renderConversation()
-	view := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	if !m.addContactOpen {
-		return view
+	var view string
+	if m.width < narrowThreshold {
+		// Narrow terminals can't fit both panes. Render whichever pane has
+		// focus; tab toggles between them.
+		if m.focus == focusSidebar {
+			view = m.renderSidebar()
+		} else {
+			view = m.renderConversation()
+		}
+	} else {
+		left := m.renderSidebar()
+		right := m.renderConversation()
+		view = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
-	return m.renderAddContactModal(view)
+	if m.helpOpen {
+		return m.renderHelpModal(view)
+	}
+	if m.addContactOpen {
+		return m.renderAddContactModal(view)
+	}
+	return view
 }
 
 // Status returns the persistent connection status line — connecting,
@@ -578,12 +627,31 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 	}
 }
 
+// syncViewport pushes the current m.messages slice into the viewport and
+// preserves the user's scroll position when they have scrolled up. Callers
+// that need to force the viewport to the latest message (chat switch,
+// outbound send, end-key) should call syncViewportToBottom instead.
 func (m *Model) syncViewport() {
+	if m.viewport.Width <= 0 || m.viewport.Height <= 0 {
+		return
+	}
+	wasAtBottom := m.viewport.AtBottom()
+	m.viewport.SetContent(strings.Join(m.messages, "\n"))
+	if wasAtBottom {
+		m.viewport.GotoBottom()
+		m.pendingIncoming = 0
+	}
+}
+
+// syncViewportToBottom sets the viewport content and always scrolls to the
+// latest message, clearing the pending-incoming counter.
+func (m *Model) syncViewportToBottom() {
 	if m.viewport.Width <= 0 || m.viewport.Height <= 0 {
 		return
 	}
 	m.viewport.SetContent(strings.Join(m.messages, "\n"))
 	m.viewport.GotoBottom()
+	m.pendingIncoming = 0
 }
 
 func (m *Model) connectCmd() tea.Cmd {
@@ -739,6 +807,41 @@ func (m *Model) closeAddContactModal(keepStatus bool) {
 	m.input.Focus()
 }
 
+// handleHelpKey closes the help overlay on ?, esc, q, or ctrl+c. Every other
+// key is absorbed so the chat input doesn't receive keystrokes meant to
+// dismiss the overlay.
+func (m *Model) handleHelpKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
+	switch {
+	case msg.Type == tea.KeyEsc:
+		m.helpOpen = false
+	case msg.Type == tea.KeyCtrlC:
+		m.helpOpen = false
+		return m, tea.Quit
+	case msg.Type == tea.KeyRunes && (string(msg.Runes) == "?" || string(msg.Runes) == "q"):
+		m.helpOpen = false
+	}
+	return m, nil
+}
+
+// toggleFocus flips which pane owns keyboard input. In wide mode this mostly
+// affects the border color; in narrow mode it switches which pane is rendered.
+func (m *Model) toggleFocus() {
+	if m.focus == focusChat {
+		m.focus = focusSidebar
+		m.input.Blur()
+	} else {
+		m.focus = focusChat
+		m.input.Focus()
+	}
+}
+
+// jumpToLatest scrolls the viewport all the way down and clears the pending
+// incoming-message counter that feeds the "↓ N new" pill.
+func (m *Model) jumpToLatest() {
+	m.viewport.GotoBottom()
+	m.pendingIncoming = 0
+}
+
 func (m *Model) handleAddContactKey(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -815,8 +918,10 @@ func (m *Model) activateSelectedContact() bool {
 	m.syncRecipientDetails()
 	m.clearPeerTyping()
 	m.loadHistory()
-	m.syncViewport()
+	m.syncViewportToBottom()
 	m.syncInputPlaceholder()
+	m.focus = focusChat
+	m.input.Focus()
 	return true
 }
 
@@ -884,15 +989,20 @@ func (m *Model) loadHistory() {
 		return
 	}
 	m.renderMessages()
-	m.syncViewport()
+	m.syncViewportToBottom()
 }
 
 // appendMessageItem appends a new message and refreshes the derived string
 // slice. Used by the optimistic-append paths (enter-to-send, attachments,
-// incoming messages in the active chat).
+// incoming messages in the active chat). Incoming messages that arrive while
+// the user has scrolled up feed the "↓ N new" pill counter.
 func (m *Model) appendMessageItem(item messageItem) {
+	wasAtBottom := m.viewport.AtBottom()
 	m.messageItems = append(m.messageItems, item)
 	m.renderMessages()
+	if item.direction == "inbound" && !wasAtBottom {
+		m.pendingIncoming++
+	}
 }
 
 // renderMessages rebuilds m.messages from m.messageItems. Consecutive messages
@@ -1049,6 +1159,15 @@ func (m *Model) updateLayout() {
 	if m.width <= 0 || m.height <= 0 {
 		return
 	}
+	// Narrow terminals render one pane at a time — the sidebar "width" for
+	// layout bookkeeping is the full terminal so the conversation gets all of
+	// it when focused.
+	if m.width < narrowThreshold {
+		m.sidebarWidth = m.width
+		m.viewport.Width = max(1, m.width)
+		m.viewport.Height = max(1, m.height-5)
+		return
+	}
 	sidebarWidth := 28
 	if m.width < 80 {
 		sidebarWidth = max(20, m.width/3)
@@ -1059,25 +1178,29 @@ func (m *Model) updateLayout() {
 	m.sidebarWidth = sidebarWidth
 	conversationWidth := max(1, m.width-m.sidebarWidth-1)
 	m.viewport.Width = conversationWidth
-	m.viewport.Height = max(1, m.height-4)
+	m.viewport.Height = max(1, m.height-5)
 }
 
 func (m *Model) renderSidebar() string {
-	border := style.SidebarBorder
 	title := style.Bold.Render("Contacts")
-	shortcut := "up/down browse  enter open  ctrl+n add"
+	shortcut := "up/down browse  enter open  ctrl+n add  tab switch pane"
 	if m.addContactOpen {
 		shortcut = "add contact open  ctrl+s import  esc cancel"
 	}
 	lines := []string{title, style.Muted.Render(shortcut)}
 	if len(m.contacts) == 0 {
 		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+n."))
-		return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
+	} else {
+		for idx, contact := range m.contacts {
+			lines = append(lines, m.renderSidebarRow(idx, contact))
+		}
 	}
-	for idx, contact := range m.contacts {
-		lines = append(lines, m.renderSidebarRow(idx, contact))
+	content := strings.Join(lines, "\n")
+	// Narrow mode: sidebar owns the whole screen, no right border.
+	if m.width < narrowThreshold {
+		return lipgloss.NewStyle().Width(m.sidebarWidth).Height(max(1, m.height)).Render(content)
 	}
-	return border.Width(m.sidebarWidth).Height(max(1, m.height)).Render(strings.Join(lines, "\n"))
+	return style.SidebarBorder.Width(m.sidebarWidth).Height(max(1, m.height)).Render(content)
 }
 
 func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
@@ -1120,7 +1243,7 @@ func (m *Model) renderSidebarRow(idx int, contact contactItem) string {
 }
 
 func (m *Model) renderConversation() string {
-	width := max(1, m.width-m.sidebarWidth-1)
+	width := m.conversationWidth()
 	if m.recipientMailbox == "" {
 		empty := []string{
 			style.Bold.Render("No chat selected"),
@@ -1138,13 +1261,37 @@ func (m *Model) renderConversation() string {
 	peerHeading := style.PeerAccentStyle(m.peerFingerprint).Bold(true).Render(m.recipientMailbox)
 	header := []string{
 		peerHeading,
-		style.Muted.Render("ctrl+o attach file  |  /send-photo <path>  |  /send-voice <path>"),
+		style.Muted.Render("ctrl+o attach file  |  ? help  |  tab switch pane"),
 		m.viewport.View(),
+		m.renderJumpPill(width),
 		m.renderToast(),
 		m.renderTypingIndicator(),
 		m.input.View(),
 	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(header, "\n"))
+}
+
+// conversationWidth is the effective width of the conversation pane. In narrow
+// mode the sidebar is hidden, so the pane gets the full terminal width.
+func (m *Model) conversationWidth() int {
+	if m.width < narrowThreshold {
+		return max(1, m.width)
+	}
+	return max(1, m.width-m.sidebarWidth-1)
+}
+
+// renderJumpPill renders the "↓ N new" hint right-aligned to the conversation
+// width. Empty string when no new messages have arrived while scrolled up.
+func (m *Model) renderJumpPill(width int) string {
+	if m.pendingIncoming <= 0 {
+		return ""
+	}
+	pill := style.StatusInfo.Bold(true).Render(fmt.Sprintf("%s %d new  end", style.GlyphJumpToLatest, m.pendingIncoming))
+	pad := width - lipgloss.Width(pill)
+	if pad < 0 {
+		pad = 0
+	}
+	return strings.Repeat(" ", pad) + pill
 }
 
 func (m *Model) renderAddContactModal(base string) string {
@@ -1191,6 +1338,79 @@ func (m *Model) renderAddContactEditor(width, height int) string {
 	}
 	box := style.InputBorder.Width(width).Height(height).Padding(0, 1).Render(visible)
 	return strings.Join([]string{box, meta}, "\n")
+}
+
+// helpShortcut is one entry in the help overlay — a key label and a brief
+// description. Kept as data rather than pre-formatted strings so the overlay
+// can pad the two columns consistently.
+type helpShortcut struct {
+	keys string
+	desc string
+}
+
+var helpSectionNavigation = []helpShortcut{
+	{"↑ ↓", "browse contacts"},
+	{"⏎", "open selected chat / send"},
+	{"tab", "switch pane"},
+	{"end / G", "jump to latest message"},
+	{"ctrl+c", "quit"},
+}
+
+var helpSectionMessaging = []helpShortcut{
+	{"ctrl+n", "add contact"},
+	{"ctrl+o", "attach file"},
+	{"/send-photo <path>", "attach photo via path"},
+	{"/send-voice <path>", "attach voice via path"},
+	{"/send-file <path>", "attach file via path"},
+	{"ctrl+u", "clear input"},
+	{"?", "toggle this help"},
+	{"esc", "close overlay"},
+}
+
+func (m *Model) renderHelpModal(base string) string {
+	modalWidth := min(max(64, m.width*2/3), max(40, m.width-6))
+	modalHeight := min(max(18, m.height*2/3), max(14, m.height-4))
+	if modalWidth <= 0 || modalHeight <= 0 {
+		return base
+	}
+	colWidth := max(20, (modalWidth-6)/2)
+
+	title := style.Bright.Bold(true).Render("Help")
+	navTitle := style.Bold.Render("Navigation")
+	msgTitle := style.Bold.Render("Messaging")
+	nav := renderHelpColumn(helpSectionNavigation, colWidth)
+	msg := renderHelpColumn(helpSectionMessaging, colWidth)
+	columns := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{navTitle, nav}, "\n")),
+		"  ",
+		lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{msgTitle, msg}, "\n")),
+	)
+	footer := style.Subtle.Render("? or esc to close")
+	body := strings.Join([]string{title, columns, footer}, "\n\n")
+	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
+	background := style.Faint.Render(base)
+	return strings.Join([]string{background, lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+}
+
+func renderHelpColumn(entries []helpShortcut, width int) string {
+	// Find the widest key so descriptions line up inside the column.
+	keyWidth := 0
+	for _, e := range entries {
+		if w := lipgloss.Width(e.keys); w > keyWidth {
+			keyWidth = w
+		}
+	}
+	lines := make([]string, 0, len(entries))
+	for _, e := range entries {
+		pad := keyWidth - lipgloss.Width(e.keys)
+		if pad < 0 {
+			pad = 0
+		}
+		keys := style.StatusInfo.Render(e.keys)
+		lines = append(lines, keys+strings.Repeat(" ", pad+2)+style.Muted.Render(e.desc))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m *Model) renderTypingIndicator() string {
@@ -1306,7 +1526,7 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 	})
 	m.input.SetValue("")
 	m.resetLocalTypingState()
-	m.syncViewport()
+	m.syncViewportToBottom()
 	return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
 }
 
@@ -1402,7 +1622,7 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 	})
 	m.input.SetValue("")
 	m.resetLocalTypingState()
-	m.syncViewport()
+	m.syncViewportToBottom()
 	return m.sendCmd(m.recipientMailbox, displayBody, batch)
 }
 

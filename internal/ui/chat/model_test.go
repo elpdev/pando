@@ -1244,6 +1244,111 @@ func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
 	}
 }
 
+func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
+	model := newHelpTestModel(t)
+
+	// "?" with empty input opens the overlay.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if !model.helpOpen {
+		t.Fatal("expected ? to open the help overlay")
+	}
+	if !strings.Contains(model.View(), "Help") {
+		t.Fatalf("expected help title in view: %q", model.View())
+	}
+
+	// Esc closes it.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.helpOpen {
+		t.Fatal("expected esc to close the help overlay")
+	}
+
+	// Typing "?" in the input while editing a message must not open help.
+	model.input.SetValue("draft")
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	if model.helpOpen {
+		t.Fatal("expected ? to be ignored while typing a message")
+	}
+}
+
+func TestTabTogglesFocus(t *testing.T) {
+	model := newHelpTestModel(t)
+
+	if model.focus != focusChat {
+		t.Fatalf("expected initial focus on chat, got %v", model.focus)
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if model.focus != focusSidebar {
+		t.Fatalf("expected tab to move focus to sidebar, got %v", model.focus)
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if model.focus != focusChat {
+		t.Fatalf("expected tab to move focus back to chat, got %v", model.focus)
+	}
+}
+
+func TestPendingIncomingRendersJumpPillAndClearsOnEnd(t *testing.T) {
+	model := newHelpTestModel(t)
+	model.recipientMailbox = "bob"
+	model.peerFingerprint = "abcd1234abcd1234"
+	model.SetSize(100, 20)
+
+	// Seed a long conversation so there is room to scroll up.
+	for i := 0; i < 40; i++ {
+		model.messageItems = append(model.messageItems, messageItem{
+			direction: "inbound",
+			sender:    "bob",
+			body:      fmt.Sprintf("line %d", i),
+			timestamp: time.Now(),
+		})
+	}
+	model.renderMessages()
+	model.syncViewportToBottom()
+
+	// Scroll up so subsequent arrivals don't auto-snap to bottom.
+	model.viewport.SetYOffset(0)
+	if model.viewport.AtBottom() {
+		t.Fatal("precondition: viewport should be scrolled up")
+	}
+
+	model.appendMessageItem(messageItem{
+		direction: "inbound", sender: "bob", body: "new 1", timestamp: time.Now(),
+	})
+	model.appendMessageItem(messageItem{
+		direction: "inbound", sender: "bob", body: "new 2", timestamp: time.Now(),
+	})
+	if model.pendingIncoming != 2 {
+		t.Fatalf("expected pending=2 after two inbound while scrolled up, got %d", model.pendingIncoming)
+	}
+	if !strings.Contains(model.View(), "2 new") {
+		t.Fatalf("expected '2 new' pill in view: %q", model.View())
+	}
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if model.pendingIncoming != 0 {
+		t.Fatalf("expected end-key to clear pending, got %d", model.pendingIncoming)
+	}
+	if !model.viewport.AtBottom() {
+		t.Fatal("expected end-key to scroll viewport to bottom")
+	}
+}
+
+func newHelpTestModel(t *testing.T) *Model {
+	t.Helper()
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+	return model
+}
+
 func stringsContainsAny(lines []string, needle string) bool {
 	for _, line := range lines {
 		if strings.Contains(line, needle) {
