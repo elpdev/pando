@@ -167,6 +167,72 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 	}
 }
 
+func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	voicePath := filepath.Join(t.TempDir(), "clip.wav")
+	if err := os.WriteFile(voicePath, mustVoiceBytes(), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+	model.input.SetValue("/send-voice " + voicePath)
+
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if cmd == nil {
+		t.Fatal("expected send command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected voice send to produce envelopes")
+	}
+	if model.input.Value() != "" {
+		t.Fatalf("expected input to clear after send, got %q", model.input.Value())
+	}
+	found := false
+	for _, message := range model.messages {
+		if message == "you -> bob: voice note sent: clip.wav" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected sent voice message in history: %+v", model.messages)
+	}
+}
+
 func mustPhotoBytes(t *testing.T) []byte {
 	t.Helper()
 	bytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zl9sAAAAASUVORK5CYII=")
@@ -174,4 +240,17 @@ func mustPhotoBytes(t *testing.T) []byte {
 		t.Fatalf("decode photo bytes: %v", err)
 	}
 	return bytes
+}
+
+func mustVoiceBytes() []byte {
+	return []byte{
+		'R', 'I', 'F', 'F', 0x24, 0x08, 0x00, 0x00,
+		'W', 'A', 'V', 'E',
+		'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x01, 0x00,
+		0x40, 0x1f, 0x00, 0x00,
+		0x80, 0x3e, 0x00, 0x00,
+		0x02, 0x00, 0x10, 0x00,
+		'd', 'a', 't', 'a', 0x00, 0x08, 0x00, 0x00,
+	}
 }

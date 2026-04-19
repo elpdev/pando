@@ -240,7 +240,7 @@ func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	}
 
 	photoBytes := mustPhotoBytes(t)
-	photoBytes = append(photoBytes, make([]byte, photoChunkSizeBytes*2)...)
+	photoBytes = append(photoBytes, make([]byte, attachmentChunkSizeBytes*2)...)
 	photoPath := filepath.Join(t.TempDir(), "photo.png")
 	if err := os.WriteFile(photoPath, photoBytes, 0o600); err != nil {
 		t.Fatalf("write photo fixture: %v", err)
@@ -408,6 +408,88 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 	}
 }
 
+func TestVoiceChunkRoundTripStoresAttachment(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobDir := t.TempDir()
+	bobStore := store.NewClientStore(bobDir)
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	voiceBytes := mustVoiceBytes(t)
+	voiceBytes = append(voiceBytes, make([]byte, attachmentChunkSizeBytes*2)...)
+	voicePath := filepath.Join(t.TempDir(), "clip.wav")
+	if err := os.WriteFile(voicePath, voiceBytes, 0o600); err != nil {
+		t.Fatalf("write voice fixture: %v", err)
+	}
+
+	batch, displayBody, err := aliceService.PrepareVoiceOutgoing("bob", voicePath)
+	if err != nil {
+		t.Fatalf("prepare voice outgoing: %v", err)
+	}
+	if batch == nil || len(batch.Envelopes) < 3 {
+		t.Fatalf("expected voice batch with chunk envelopes, got %+v", batch)
+	}
+	if displayBody != "voice note sent: clip.wav" {
+		t.Fatalf("unexpected voice display body: %q", displayBody)
+	}
+
+	var finalResult *IncomingResult
+	for i := range batch.Envelopes {
+		envelope := batch.Envelopes[i]
+		envelope.ID = fmt.Sprintf("voice-env-%d", i)
+		result, err := bobService.HandleIncoming(envelope)
+		if err != nil {
+			t.Fatalf("handle incoming envelope %d: %v", i, err)
+		}
+		if result != nil && !result.Control && result.Body != "" {
+			finalResult = result
+		}
+	}
+	if finalResult == nil {
+		t.Fatal("expected final voice result")
+	}
+	if !strings.Contains(finalResult.Body, "voice note received: clip.wav saved to ") {
+		t.Fatalf("unexpected final body: %q", finalResult.Body)
+	}
+	attachmentPaths, err := filepath.Glob(filepath.Join(bobDir, "attachments", "alice", "*"))
+	if err != nil {
+		t.Fatalf("glob attachments: %v", err)
+	}
+	if len(attachmentPaths) != 1 {
+		t.Fatalf("expected one stored attachment, got %v", attachmentPaths)
+	}
+	storedBytes, err := os.ReadFile(attachmentPaths[0])
+	if err != nil {
+		t.Fatalf("read stored attachment: %v", err)
+	}
+	if string(storedBytes) != string(voiceBytes) {
+		t.Fatal("stored attachment bytes did not match original voice note")
+	}
+	if len(finalResult.AckEnvelopes) != 0 {
+		t.Fatalf("expected no delivery ack for voice chunks, got %d", len(finalResult.AckEnvelopes))
+	}
+}
+
 func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
 	defer server.Close()
@@ -521,6 +603,20 @@ func mustPhotoBytes(t *testing.T) []byte {
 		t.Fatalf("decode photo bytes: %v", err)
 	}
 	return bytes
+}
+
+func mustVoiceBytes(t *testing.T) []byte {
+	t.Helper()
+	return []byte{
+		'R', 'I', 'F', 'F', 0x24, 0x08, 0x00, 0x00,
+		'W', 'A', 'V', 'E',
+		'f', 'm', 't', ' ', 0x10, 0x00, 0x00, 0x00,
+		0x01, 0x00, 0x01, 0x00,
+		0x40, 0x1f, 0x00, 0x00,
+		0x80, 0x3e, 0x00, 0x00,
+		0x02, 0x00, 0x10, 0x00,
+		'd', 'a', 't', 'a', 0x00, 0x08, 0x00, 0x00,
+	}
 }
 
 func awaitSubscribeAck(t *testing.T, events <-chan transport.Event) {

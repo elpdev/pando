@@ -11,34 +11,38 @@ import (
 )
 
 const (
-	contentKindText       = "text"
-	contentKindPhotoChunk = "photo-chunk"
-	photoChunkSizeBytes   = 8 * 1024
+	contentKindText            = "text"
+	contentKindAttachmentChunk = "attachment-chunk"
+	attachmentTypePhoto        = "photo"
+	attachmentTypeVoice        = "voice"
+	attachmentChunkSizeBytes   = 8 * 1024
 )
 
 type contentPayload struct {
-	Kind       string             `json:"kind"`
-	Text       string             `json:"text,omitempty"`
-	PhotoChunk *photoChunkPayload `json:"photo_chunk,omitempty"`
+	Kind            string                  `json:"kind"`
+	Text            string                  `json:"text,omitempty"`
+	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
 }
 
-type photoChunkPayload struct {
-	AttachmentID string `json:"attachment_id"`
-	Filename     string `json:"filename"`
-	MIMEType     string `json:"mime_type"`
-	TotalSize    int    `json:"total_size"`
-	ChunkIndex   int    `json:"chunk_index"`
-	ChunkCount   int    `json:"chunk_count"`
-	Data         string `json:"data"`
+type attachmentChunkPayload struct {
+	AttachmentType string `json:"attachment_type"`
+	AttachmentID   string `json:"attachment_id"`
+	Filename       string `json:"filename"`
+	MIMEType       string `json:"mime_type"`
+	TotalSize      int    `json:"total_size"`
+	ChunkIndex     int    `json:"chunk_index"`
+	ChunkCount     int    `json:"chunk_count"`
+	Data           string `json:"data"`
 }
 
-type incomingPhoto struct {
-	filename   string
-	mimeType   string
-	totalSize  int
-	chunkCount int
-	chunks     [][]byte
-	received   int
+type incomingAttachment struct {
+	attachmentType string
+	filename       string
+	mimeType       string
+	totalSize      int
+	chunkCount     int
+	chunks         [][]byte
+	received       int
 }
 
 func decodeContentPayload(body string) (*contentPayload, bool, error) {
@@ -52,33 +56,34 @@ func decodeContentPayload(body string) (*contentPayload, bool, error) {
 	return &payload, true, nil
 }
 
-func buildPhotoChunkPayloads(filename, mimeType string, bytes []byte) ([]string, string, error) {
+func buildAttachmentChunkPayloads(attachmentType, filename, mimeType string, bytes []byte) ([]string, string, error) {
 	attachmentID := uuid.NewString()
-	chunkCount := (len(bytes) + photoChunkSizeBytes - 1) / photoChunkSizeBytes
+	chunkCount := (len(bytes) + attachmentChunkSizeBytes - 1) / attachmentChunkSizeBytes
 	if chunkCount == 0 {
 		chunkCount = 1
 	}
 	payloads := make([]string, 0, chunkCount)
 	for chunkIndex := 0; chunkIndex < chunkCount; chunkIndex++ {
-		start := chunkIndex * photoChunkSizeBytes
-		end := start + photoChunkSizeBytes
+		start := chunkIndex * attachmentChunkSizeBytes
+		end := start + attachmentChunkSizeBytes
 		if end > len(bytes) {
 			end = len(bytes)
 		}
 		payload, err := json.Marshal(contentPayload{
-			Kind: contentKindPhotoChunk,
-			PhotoChunk: &photoChunkPayload{
-				AttachmentID: attachmentID,
-				Filename:     sanitizeAttachmentName(filename),
-				MIMEType:     mimeType,
-				TotalSize:    len(bytes),
-				ChunkIndex:   chunkIndex,
-				ChunkCount:   chunkCount,
-				Data:         base64.StdEncoding.EncodeToString(bytes[start:end]),
+			Kind: contentKindAttachmentChunk,
+			AttachmentChunk: &attachmentChunkPayload{
+				AttachmentType: attachmentType,
+				AttachmentID:   attachmentID,
+				Filename:       sanitizeAttachmentName(filename),
+				MIMEType:       mimeType,
+				TotalSize:      len(bytes),
+				ChunkIndex:     chunkIndex,
+				ChunkCount:     chunkCount,
+				Data:           base64.StdEncoding.EncodeToString(bytes[start:end]),
 			},
 		})
 		if err != nil {
-			return nil, "", fmt.Errorf("encode photo payload: %w", err)
+			return nil, "", fmt.Errorf("encode attachment payload: %w", err)
 		}
 		payloads = append(payloads, string(payload))
 	}

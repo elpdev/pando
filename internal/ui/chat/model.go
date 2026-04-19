@@ -132,6 +132,22 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				m.syncViewport()
 				return m, m.sendCmd(displayBody, batch)
 			}
+			if strings.HasPrefix(body, "/send-voice") {
+				path := strings.TrimSpace(strings.TrimPrefix(body, "/send-voice"))
+				if path == "" {
+					m.status = "usage: /send-voice <path>"
+					return m, nil
+				}
+				batch, displayBody, err := m.messaging.PrepareVoiceOutgoing(m.recipientMailbox, path)
+				if err != nil {
+					m.status = err.Error()
+					return m, nil
+				}
+				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
+				m.input.SetValue("")
+				m.syncViewport()
+				return m, m.sendCmd(displayBody, batch)
+			}
 			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
 			if err != nil {
 				m.status = err.Error()

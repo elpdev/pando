@@ -41,9 +41,9 @@ type OutgoingBatch struct {
 }
 
 type Service struct {
-	store          *store.ClientStore
-	identity       *identity.Identity
-	incomingPhotos map[string]*incomingPhoto
+	store               *store.ClientStore
+	identity            *identity.Identity
+	incomingAttachments map[string]*incomingAttachment
 }
 
 func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
@@ -54,7 +54,7 @@ func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
 	if err := id.Validate(); err != nil {
 		return nil, false, err
 	}
-	return &Service{store: store, identity: id, incomingPhotos: make(map[string]*incomingPhoto)}, created, nil
+	return &Service{store: store, identity: id, incomingAttachments: make(map[string]*incomingAttachment)}, created, nil
 }
 
 func (s *Service) Identity() *identity.Identity {
@@ -127,6 +127,14 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBat
 }
 
 func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypePhoto)
+}
+
+func (s *Service) PrepareVoiceOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeVoice)
+}
+
+func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachmentType string) (*OutgoingBatch, string, error) {
 	contact, err := s.store.LoadContact(recipientAccountID)
 	if err != nil {
 		if err == store.ErrNotFound {
@@ -136,7 +144,7 @@ func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*Outgoi
 	}
 	bytes, err := os.ReadFile(path)
 	if err != nil {
-		return nil, "", fmt.Errorf("read photo: %w", err)
+		return nil, "", fmt.Errorf("read %s: %w", attachmentLabel(attachmentType), err)
 	}
 	filename := filepath.Base(path)
 	mimeType := http.DetectContentType(bytes)
@@ -148,10 +156,10 @@ func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*Outgoi
 			}
 		}
 	}
-	if !strings.HasPrefix(mimeType, "image/") {
-		return nil, "", fmt.Errorf("%s is not a supported image file", path)
+	if err := validateAttachmentMIMEType(path, mimeType, attachmentType); err != nil {
+		return nil, "", err
 	}
-	payloads, _, err := buildPhotoChunkPayloads(filename, mimeType, bytes)
+	payloads, _, err := buildAttachmentChunkPayloads(attachmentType, filename, mimeType, bytes)
 	if err != nil {
 		return nil, "", err
 	}
@@ -168,7 +176,7 @@ func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*Outgoi
 		}
 		envelopes = append(envelopes, chunkEnvelopes...)
 	}
-	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("photo sent: %s", sanitizeAttachmentName(filename)), nil
+	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", attachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
 }
 
 func missingContactError(recipientAccountID string) error {
@@ -221,8 +229,8 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 	if err != nil {
 		return nil, err
 	}
-	if ok && payload.Kind == contentKindPhotoChunk {
-		message, done, err := s.handleIncomingPhotoChunk(contact.AccountID, payload.PhotoChunk)
+	if ok && payload.Kind == contentKindAttachmentChunk {
+		message, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
 		if err != nil {
 			return nil, err
 		}
@@ -238,34 +246,38 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body, MessageID: envelope.ClientMessageID, AckEnvelopes: ackEnvelopes}, nil
 }
 
-func (s *Service) handleIncomingPhotoChunk(peerAccountID string, chunk *photoChunkPayload) (string, bool, error) {
-	if s.incomingPhotos == nil {
-		s.incomingPhotos = make(map[string]*incomingPhoto)
+func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *attachmentChunkPayload) (string, bool, error) {
+	if s.incomingAttachments == nil {
+		s.incomingAttachments = make(map[string]*incomingAttachment)
 	}
 	if chunk == nil {
-		return "", false, fmt.Errorf("photo payload is required")
+		return "", false, fmt.Errorf("attachment payload is required")
+	}
+	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice {
+		return "", false, fmt.Errorf("invalid attachment payload type")
 	}
 	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.ChunkCount <= 0 || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
-		return "", false, fmt.Errorf("invalid photo payload metadata")
+		return "", false, fmt.Errorf("invalid attachment payload metadata")
 	}
 	bytes, err := base64.StdEncoding.DecodeString(chunk.Data)
 	if err != nil {
-		return "", false, fmt.Errorf("decode photo chunk: %w", err)
+		return "", false, fmt.Errorf("decode attachment chunk: %w", err)
 	}
 	key := peerAccountID + ":" + chunk.AttachmentID
-	pending, ok := s.incomingPhotos[key]
+	pending, ok := s.incomingAttachments[key]
 	if !ok {
-		pending = &incomingPhoto{
-			filename:   sanitizeAttachmentName(chunk.Filename),
-			mimeType:   chunk.MIMEType,
-			totalSize:  chunk.TotalSize,
-			chunkCount: chunk.ChunkCount,
-			chunks:     make([][]byte, chunk.ChunkCount),
+		pending = &incomingAttachment{
+			attachmentType: chunk.AttachmentType,
+			filename:       sanitizeAttachmentName(chunk.Filename),
+			mimeType:       chunk.MIMEType,
+			totalSize:      chunk.TotalSize,
+			chunkCount:     chunk.ChunkCount,
+			chunks:         make([][]byte, chunk.ChunkCount),
 		}
-		s.incomingPhotos[key] = pending
+		s.incomingAttachments[key] = pending
 	}
-	if pending.chunkCount != chunk.ChunkCount || pending.filename != sanitizeAttachmentName(chunk.Filename) {
-		return "", false, fmt.Errorf("photo payload does not match existing transfer")
+	if pending.attachmentType != chunk.AttachmentType || pending.chunkCount != chunk.ChunkCount || pending.filename != sanitizeAttachmentName(chunk.Filename) {
+		return "", false, fmt.Errorf("attachment payload does not match existing transfer")
 	}
 	if pending.chunks[chunk.ChunkIndex] == nil {
 		pending.chunks[chunk.ChunkIndex] = bytes
@@ -277,19 +289,47 @@ func (s *Service) handleIncomingPhotoChunk(peerAccountID string, chunk *photoChu
 	assembled := make([]byte, 0, pending.totalSize)
 	for _, part := range pending.chunks {
 		if part == nil {
-			return "", false, fmt.Errorf("photo transfer is missing chunks")
+			return "", false, fmt.Errorf("attachment transfer is missing chunks")
 		}
 		assembled = append(assembled, part...)
 	}
 	if pending.totalSize > 0 && len(assembled) != pending.totalSize {
-		return "", false, fmt.Errorf("photo transfer size mismatch")
+		return "", false, fmt.Errorf("attachment transfer size mismatch")
 	}
 	path, err := s.store.SaveAttachment(peerAccountID, chunk.AttachmentID, pending.filename, assembled)
 	if err != nil {
 		return "", false, err
 	}
-	delete(s.incomingPhotos, key)
-	return fmt.Sprintf("photo received: %s saved to %s", pending.filename, path), true, nil
+	delete(s.incomingAttachments, key)
+	return fmt.Sprintf("%s received: %s saved to %s", attachmentLabel(pending.attachmentType), pending.filename, path), true, nil
+}
+
+func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {
+	switch attachmentType {
+	case attachmentTypePhoto:
+		if strings.HasPrefix(mimeType, "image/") {
+			return nil
+		}
+		return fmt.Errorf("%s is not a supported image file", path)
+	case attachmentTypeVoice:
+		if strings.HasPrefix(mimeType, "audio/") {
+			return nil
+		}
+		return fmt.Errorf("%s is not a supported audio file", path)
+	default:
+		return fmt.Errorf("unsupported attachment type %q", attachmentType)
+	}
+}
+
+func attachmentLabel(attachmentType string) string {
+	switch attachmentType {
+	case attachmentTypePhoto:
+		return "photo"
+	case attachmentTypeVoice:
+		return "voice note"
+	default:
+		return "attachment"
+	}
 }
 
 func (s *Service) contactUpdateEnvelopes(contact *identity.Contact) ([]protocol.Envelope, error) {
