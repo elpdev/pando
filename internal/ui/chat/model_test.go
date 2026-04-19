@@ -948,14 +948,21 @@ func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 	}
 	model.handleProtocolMessage(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelopes[0]})
 	view := model.View()
-	if !strings.Contains(view, "bob is typing.") {
+	if !strings.Contains(view, "bob is typing") {
 		t.Fatalf("expected typing indicator in view: %q", view)
 	}
 
 	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(typingAnimationInterval)))
 	view = model.View()
-	if !strings.Contains(view, "bob is typing..") {
+	if !strings.Contains(view, "bob is typing") {
 		t.Fatalf("expected animated typing indicator in view: %q", view)
+	}
+	// Verify spinner actually advanced (frame changed)
+	view2 := model.View()
+	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(2 * typingAnimationInterval)))
+	view3 := model.View()
+	if view2 == view3 {
+		t.Fatalf("expected typing indicator to animate between frames, got same view: %q", view3)
 	}
 
 	model.peerTypingExpiresAt = time.Now().UTC().Add(-time.Second)

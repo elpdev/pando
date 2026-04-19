@@ -4,8 +4,8 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/ui/chat"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type App struct {
@@ -51,8 +51,8 @@ func (a *App) View() string {
 	if a.chat.RecipientMailbox() != "" {
 		headerText += "  chat=" + a.chat.RecipientMailbox()
 	}
-	header := lipgloss.NewStyle().Bold(true).Render(headerText)
-	status := lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(a.chat.Status())
+	header := style.Bold.Render(headerText)
+	status := style.Muted.Render(a.chat.Status())
 
 	return strings.Join([]string{header, status, a.chat.View()}, "\n")
 }
