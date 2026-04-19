@@ -8,19 +8,18 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/session"
-	"github.com/elpdev/pando/internal/store"
 )
 
 func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypePhoto)
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, AttachmentTypePhoto)
 }
 
 func (s *Service) PrepareVoiceOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeVoice)
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, AttachmentTypeVoice)
 }
 
 func (s *Service) PrepareFileOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeFile)
+	return s.prepareAttachmentOutgoing(recipientAccountID, path, AttachmentTypeFile)
 }
 
 func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachmentType string) (*OutgoingBatch, string, error) {
@@ -42,18 +41,6 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 	}
 	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
 }
-
-func (s *Service) loadOutgoingContact(recipientAccountID string) (*identity.Contact, error) {
-	contact, err := s.store.LoadContact(recipientAccountID)
-	if err != nil {
-		if err == store.ErrNotFound {
-			return nil, missingContactError(recipientAccountID)
-		}
-		return nil, err
-	}
-	return contact, nil
-}
-
 func loadAttachmentPayload(path, attachmentType string) ([]byte, string, string, error) {
 	bytes, err := os.ReadFile(path)
 	if err != nil {

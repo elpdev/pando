@@ -4,6 +4,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"mime"
+	"net/http"
 	"path/filepath"
 	"strings"
 	"time"
@@ -28,13 +30,10 @@ const (
 	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
 )
 
-const (
-	typingStateActive   = TypingStateActive
-	typingStateIdle     = TypingStateIdle
-	attachmentTypePhoto = AttachmentTypePhoto
-	attachmentTypeVoice = AttachmentTypeVoice
-	attachmentTypeFile  = AttachmentTypeFile
-)
+type deliveryAck struct {
+	MessageID   string    `json:"message_id"`
+	DeliveredAt time.Time `json:"delivered_at"`
+}
 
 type contentPayload struct {
 	Kind            string                  `json:"kind"`
@@ -121,6 +120,39 @@ func buildAttachmentChunkPayloads(attachmentType, filename, mimeType string, byt
 		payloads = append(payloads, string(payload))
 	}
 	return payloads, attachmentID, nil
+}
+
+func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {
+	switch attachmentType {
+	case AttachmentTypePhoto:
+		if strings.HasPrefix(mimeType, "image/") {
+			return nil
+		}
+		return fmt.Errorf("%s is not a supported image file", path)
+	case AttachmentTypeVoice:
+		if strings.HasPrefix(mimeType, "audio/") {
+			return nil
+		}
+		return fmt.Errorf("%s is not a supported audio file", path)
+	case AttachmentTypeFile:
+		return nil
+	default:
+		return fmt.Errorf("unsupported attachment type %q", attachmentType)
+	}
+}
+
+func detectAttachmentMIMEType(filename string, bytes []byte, attachmentType string) string {
+	mimeType := http.DetectContentType(bytes)
+	ext := strings.ToLower(filepath.Ext(filename))
+	if attachmentType == AttachmentTypeVoice && ext == ".m4a" && (mimeType == "application/octet-stream" || mimeType == "application/mp4" || mimeType == "video/mp4") {
+		return "audio/mp4"
+	}
+	if mimeType == "application/octet-stream" && ext != "" {
+		if byExt := mime.TypeByExtension(ext); byExt != "" {
+			return byExt
+		}
+	}
+	return mimeType
 }
 
 func sanitizeAttachmentName(name string) string {

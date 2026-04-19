@@ -66,7 +66,7 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if err := bobStore.SaveContact(aliceContact); err != nil {
 		t.Fatalf("save alice contact: %v", err)
 	}
-	bobService := &Service{store: bobStore, identity: bob}
+	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore)}
 
 	result, err := bobService.HandleIncoming(batch.Envelopes[0])
 	if err != nil {
@@ -115,7 +115,7 @@ func TestHandleIncomingSkipsDuplicateEnvelopeIDs(t *testing.T) {
 	if err := bobStore.SaveContact(aliceContact); err != nil {
 		t.Fatalf("save alice contact: %v", err)
 	}
-	bobService := &Service{store: bobStore, identity: bob}
+	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore)}
 
 	first, err := bobService.HandleIncoming(chatEnvelope)
 	if err != nil {
@@ -223,7 +223,7 @@ func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 		t.Fatalf("save alice contact: %v", err)
 	}
 
-	envelopes, err := bobService.TypingEnvelopes("alice", typingStateActive)
+	envelopes, err := bobService.TypingEnvelopes("alice", TypingStateActive)
 	if err != nil {
 		t.Fatalf("typing envelopes: %v", err)
 	}
@@ -240,7 +240,7 @@ func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 	if result.PeerAccountID != "bob" {
 		t.Fatalf("expected bob peer account, got %q", result.PeerAccountID)
 	}
-	if result.TypingState != typingStateActive {
+	if result.TypingState != TypingStateActive {
 		t.Fatalf("expected active typing state, got %q", result.TypingState)
 	}
 	if result.TypingExpiresAt.IsZero() {
@@ -257,7 +257,7 @@ func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 		t.Fatalf("expected typing indicator to stay out of history: %+v", history)
 	}
 
-	idleEnvelopes, err := bobService.TypingEnvelopes("alice", typingStateIdle)
+	idleEnvelopes, err := bobService.TypingEnvelopes("alice", TypingStateIdle)
 	if err != nil {
 		t.Fatalf("idle typing envelopes: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 	if err != nil {
 		t.Fatalf("handle idle typing envelope: %v", err)
 	}
-	if idleResult == nil || idleResult.TypingState != typingStateIdle {
+	if idleResult == nil || idleResult.TypingState != TypingStateIdle {
 		t.Fatalf("expected idle typing result: %+v", idleResult)
 	}
 	if !idleResult.TypingExpiresAt.IsZero() {
@@ -378,7 +378,7 @@ func TestHandleIncomingAttachmentChunkRejectsOversizedTransfer(t *testing.T) {
 		t.Fatalf("new service: %v", err)
 	}
 	_, _, err = service.handleIncomingAttachmentChunk("alice", &attachmentChunkPayload{
-		AttachmentType: attachmentTypePhoto,
+		AttachmentType: AttachmentTypePhoto,
 		AttachmentID:   "photo-1",
 		Filename:       "photo.png",
 		MIMEType:       "image/png",
@@ -399,7 +399,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 	}
 	service.incomingAttachments = &incomingAttachmentAssembler{store: service.store, pending: map[string]*incomingAttachment{
 		"alice:stale": {
-			attachmentType: attachmentTypePhoto,
+			attachmentType: AttachmentTypePhoto,
 			filename:       "stale.png",
 			totalSize:      4,
 			chunkCount:     1,
@@ -408,7 +408,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 		},
 	}}
 	_, done, err := service.handleIncomingAttachmentChunk("alice", &attachmentChunkPayload{
-		AttachmentType: attachmentTypePhoto,
+		AttachmentType: AttachmentTypePhoto,
 		AttachmentID:   "fresh",
 		Filename:       "photo.png",
 		MIMEType:       "image/png",

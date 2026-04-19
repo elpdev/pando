@@ -9,6 +9,12 @@ import (
 	"github.com/elpdev/pando/internal/store"
 )
 
+const (
+	incomingAttachmentTTL             = 15 * time.Minute
+	maxPendingIncomingAttachments     = 128
+	maxPendingIncomingAttachmentsPeer = 16
+)
+
 type incomingAttachmentAssembler struct {
 	store   *store.ClientStore
 	pending map[string]*incomingAttachment
@@ -27,7 +33,7 @@ func (a *incomingAttachmentAssembler) handleChunk(peerAccountID string, chunk *a
 	if chunk == nil {
 		return "", false, fmt.Errorf("attachment payload is required")
 	}
-	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice && chunk.AttachmentType != attachmentTypeFile {
+	if chunk.AttachmentType != AttachmentTypePhoto && chunk.AttachmentType != AttachmentTypeVoice && chunk.AttachmentType != AttachmentTypeFile {
 		return "", false, fmt.Errorf("invalid attachment payload type")
 	}
 	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.TotalSize <= 0 || chunk.TotalSize > maxAttachmentSizeBytes || chunk.ChunkCount <= 0 || chunk.ChunkCount > maxAttachmentChunkCount || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
