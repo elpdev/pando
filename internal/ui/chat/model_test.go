@@ -453,6 +453,131 @@ func TestSendVoiceCommandAcceptsEscapedSpacesInPath(t *testing.T) {
 	}
 }
 
+func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        aliceService,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+	envelopes, err := bobService.TypingEnvelopes("alice", typingStateActive)
+	if err != nil {
+		t.Fatalf("typing envelopes: %v", err)
+	}
+	model.handleProtocolMessage(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelopes[0]})
+	view := model.View()
+	if !strings.Contains(view, "bob is typing.") {
+		t.Fatalf("expected typing indicator in view: %q", view)
+	}
+
+	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(typingAnimationInterval)))
+	view = model.View()
+	if !strings.Contains(view, "bob is typing..") {
+		t.Fatalf("expected animated typing indicator in view: %q", view)
+	}
+
+	model.peerTypingExpiresAt = time.Now().UTC().Add(-time.Second)
+	_, _ = model.Update(typingTickMsg(time.Now().UTC()))
+	view = model.View()
+	if strings.Contains(view, "bob is typing") {
+		t.Fatalf("expected typing indicator to expire: %q", view)
+	}
+}
+
+func TestHandleInputActivitySendsTypingWithoutSavingHistory(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	client := &recordingClient{}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.connected = true
+	model.connecting = false
+
+	cmd := model.handleInputActivity("", "h")
+	if cmd == nil {
+		t.Fatal("expected typing start command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected typing result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected typing indicator envelope to be sent")
+	}
+	history, err := service.History("bob")
+	if err != nil {
+		t.Fatalf("load history: %v", err)
+	}
+	if len(history) != 0 {
+		t.Fatalf("expected no saved history for typing indicator: %+v", history)
+	}
+
+	cmd = model.handleInputActivity("h", "")
+	if cmd == nil {
+		t.Fatal("expected typing stop command")
+	}
+	msg = cmd()
+	if msg == nil {
+		t.Fatal("expected typing stop result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) < 2 {
+		t.Fatalf("expected idle typing envelope after clearing input, got %d sends", len(client.sent))
+	}
+	if model.localTypingSent {
+		t.Fatal("expected local typing state to reset")
+	}
+}
+
 func mustPhotoBytes(t *testing.T) []byte {
 	t.Helper()
 	bytes, err := base64.StdEncoding.DecodeString("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Zl9sAAAAASUVORK5CYII=")

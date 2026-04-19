@@ -32,37 +32,52 @@ type contactItem struct {
 }
 
 type Model struct {
-	client           transport.Client
-	messaging        *messaging.Service
-	mailbox          string
-	recipientMailbox string
-	relayURL         string
-	input            textinput.Model
-	viewport         viewport.Model
-	contacts         []contactItem
-	selectedIndex    int
-	messages         []string
-	status           string
-	connecting       bool
-	disconnected     bool
-	connected        bool
-	authFailed       bool
-	reconnectAttempt int
-	peerFingerprint  string
-	peerVerified     bool
-	width            int
-	height           int
-	sidebarWidth     int
+	client              transport.Client
+	messaging           *messaging.Service
+	mailbox             string
+	recipientMailbox    string
+	relayURL            string
+	input               textinput.Model
+	viewport            viewport.Model
+	contacts            []contactItem
+	selectedIndex       int
+	messages            []string
+	status              string
+	connecting          bool
+	disconnected        bool
+	connected           bool
+	authFailed          bool
+	reconnectAttempt    int
+	peerFingerprint     string
+	peerVerified        bool
+	peerTyping          bool
+	peerTypingExpiresAt time.Time
+	typingFrame         int
+	localTypingSent     bool
+	localTypingPeer     string
+	localTypingAt       time.Time
+	width               int
+	height              int
+	sidebarWidth        int
 }
 
 type clientEventMsg transport.Event
 type reconnectResultMsg struct{ err error }
+type typingTickMsg time.Time
+type typingSendResultMsg struct{ err error }
 type sendResultMsg struct {
 	recipient string
 	messageID string
 	body      string
 	err       error
 }
+
+const (
+	typingAnimationInterval = 350 * time.Millisecond
+	typingIdleTimeout       = 2 * time.Second
+	typingStateActive       = "active"
+	typingStateIdle         = "idle"
+)
 
 func New(deps Deps) *Model {
 	input := textinput.New()
@@ -93,7 +108,7 @@ func New(deps Deps) *Model {
 
 func (m *Model) Init() tea.Cmd {
 	m.loadHistory()
-	return tea.Batch(m.connectCmd(), m.waitForEvent())
+	return tea.Batch(m.connectCmd(), m.waitForEvent(), m.typingTickCmd())
 }
 
 func (m *Model) SetSize(width, height int) {
@@ -116,8 +131,11 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		case tea.KeyEnter:
 			body := strings.TrimSpace(m.input.Value())
 			if body == "" {
-				m.activateSelectedContact()
-				return m, nil
+				previousRecipient := m.recipientMailbox
+				if !m.activateSelectedContact() {
+					return m, nil
+				}
+				return m, m.stopTypingCmd(previousRecipient)
 			}
 			if m.authFailed {
 				m.status = "cannot send: relay auth failed; restart with --relay-token"
@@ -144,6 +162,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				}
 				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
 				m.input.SetValue("")
+				m.resetLocalTypingState()
 				m.syncViewport()
 				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
 			}
@@ -160,6 +179,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				}
 				m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, displayBody))
 				m.input.SetValue("")
+				m.resetLocalTypingState()
 				m.syncViewport()
 				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
 			}
@@ -170,6 +190,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			}
 			m.messages = append(m.messages, fmt.Sprintf("you -> %s: %s", m.recipientMailbox, body))
 			m.input.SetValue("")
+			m.resetLocalTypingState()
 			m.syncViewport()
 			return m, m.sendCmd(m.recipientMailbox, body, batch)
 		}
@@ -183,6 +204,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.status = fmt.Sprintf("disconnected: %v", event.Err)
 			m.disconnected = true
 			m.connected = false
+			m.resetLocalTypingState()
 			return m, m.reconnectCmd()
 		}
 		if event.Message != nil {
@@ -197,10 +219,25 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			}
 			m.disconnected = true
 			m.connected = false
+			m.resetLocalTypingState()
 			return m, m.reconnectCmd()
 		}
 		m.status = fmt.Sprintf("reconnected to %s, waiting for subscribe ack", m.relayURL)
 		return m, m.waitForEvent()
+	case typingTickMsg:
+		now := time.Time(msg)
+		if m.peerTyping && !m.peerTypingExpiresAt.IsZero() && !now.Before(m.peerTypingExpiresAt) {
+			m.clearPeerTyping()
+		}
+		if m.peerTyping {
+			m.typingFrame = (m.typingFrame + 1) % 3
+		}
+		var cmd tea.Cmd
+		if m.localTypingSent && !m.localTypingAt.IsZero() && now.Sub(m.localTypingAt) >= typingIdleTimeout {
+			cmd = m.sendTypingCmd(m.localTypingPeer, typingStateIdle)
+			m.resetLocalTypingState()
+		}
+		return m, tea.Batch(m.typingTickCmd(), cmd)
 	case sendResultMsg:
 		if msg.err != nil {
 			m.status = fmt.Sprintf("send failed: %v", msg.err)
@@ -215,11 +252,18 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.syncViewport()
 		}
 		return m, nil
+	case typingSendResultMsg:
+		if msg.err != nil {
+			m.status = fmt.Sprintf("typing indicator failed: %v", msg.err)
+		}
+		return m, nil
 	}
 
+	previousValue := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
-	return m, cmd
+	typingCmd := m.handleInputActivity(previousValue, m.input.Value())
+	return m, tea.Batch(cmd, typingCmd)
 }
 
 func parseAttachmentPath(path string) string {
@@ -308,6 +352,18 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			return
 		}
 		if result.Control {
+			if result.TypingState != "" {
+				if result.PeerAccountID == m.recipientMailbox {
+					if result.TypingState == typingStateActive {
+						m.peerTyping = true
+						m.peerTypingExpiresAt = result.TypingExpiresAt
+						m.typingFrame = 0
+					} else {
+						m.clearPeerTyping()
+					}
+				}
+				return
+			}
 			if result.MessageID != "" {
 				if result.PeerAccountID == m.recipientMailbox {
 					m.loadHistory()
@@ -322,6 +378,7 @@ func (m *Model) handleProtocolMessage(msg protocol.Message) {
 			return
 		}
 		if result.PeerAccountID == m.recipientMailbox {
+			m.clearPeerTyping()
 			ts := msg.Incoming.Timestamp.Format(time.Kitchen)
 			m.messages = append(m.messages, fmt.Sprintf("[%s] %s -> %s: %s", ts, msg.Incoming.SenderMailbox, msg.Incoming.RecipientMailbox, result.Body))
 			m.syncViewport()
@@ -387,6 +444,12 @@ func (m *Model) waitForEvent() tea.Cmd {
 	}
 }
 
+func (m *Model) typingTickCmd() tea.Cmd {
+	return tea.Tick(typingAnimationInterval, func(t time.Time) tea.Msg {
+		return typingTickMsg(t)
+	})
+}
+
 func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) tea.Cmd {
 	return func() tea.Msg {
 		if batch == nil {
@@ -398,6 +461,24 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 			}
 		}
 		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body}
+	}
+}
+
+func (m *Model) sendTypingCmd(recipient, state string) tea.Cmd {
+	if recipient == "" || m.authFailed || !m.connected {
+		return nil
+	}
+	return func() tea.Msg {
+		envelopes, err := m.messaging.TypingEnvelopes(recipient, state)
+		if err != nil {
+			return typingSendResultMsg{err: err}
+		}
+		for _, envelope := range envelopes {
+			if err := m.client.Send(envelope); err != nil {
+				return typingSendResultMsg{err: err}
+			}
+		}
+		return typingSendResultMsg{}
 	}
 }
 
@@ -450,6 +531,7 @@ func (m *Model) activateSelectedContact() bool {
 	}
 	m.recipientMailbox = m.contacts[m.selectedIndex].Mailbox
 	m.syncRecipientDetails()
+	m.clearPeerTyping()
 	m.loadHistory()
 	m.syncViewport()
 	m.syncInputPlaceholder()
@@ -531,7 +613,7 @@ func (m *Model) updateLayout() {
 	m.sidebarWidth = sidebarWidth
 	conversationWidth := max(1, m.width-m.sidebarWidth-1)
 	m.viewport.Width = conversationWidth
-	m.viewport.Height = max(1, m.height-3)
+	m.viewport.Height = max(1, m.height-4)
 }
 
 func (m *Model) renderSidebar() string {
@@ -579,9 +661,18 @@ func (m *Model) renderConversation() string {
 		lipgloss.NewStyle().Bold(true).Render(m.recipientMailbox),
 		lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Render(fmt.Sprintf("fingerprint %s  %s", m.peerFingerprint, verificationLabel(m.peerVerified))),
 		m.viewport.View(),
+		m.renderTypingIndicator(),
 		m.input.View(),
 	}
 	return lipgloss.NewStyle().Width(width).Render(strings.Join(header, "\n"))
+}
+
+func (m *Model) renderTypingIndicator() string {
+	if !m.peerTyping || m.recipientMailbox == "" {
+		return ""
+	}
+	dots := strings.Repeat(".", m.typingFrame+1)
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("241")).Italic(true).Render(fmt.Sprintf("%s is typing%s", m.recipientMailbox, dots))
 }
 
 func (m *Model) upsertContact(contact *identity.Contact) {
@@ -624,5 +715,55 @@ func (m *Model) handleAuthFailure(err error) {
 	m.disconnected = true
 	m.authFailed = true
 	m.status = fmt.Sprintf("relay auth failed: %v", err)
+	m.clearPeerTyping()
+	m.resetLocalTypingState()
 	m.syncInputPlaceholder()
+}
+
+func (m *Model) handleInputActivity(previousValue, currentValue string) tea.Cmd {
+	if previousValue == currentValue {
+		return nil
+	}
+	if m.recipientMailbox == "" || m.authFailed || !m.connected {
+		return nil
+	}
+	now := time.Now().UTC()
+	if strings.TrimSpace(currentValue) == "" {
+		if !m.localTypingSent || m.localTypingPeer != m.recipientMailbox {
+			m.resetLocalTypingState()
+			return nil
+		}
+		cmd := m.sendTypingCmd(m.recipientMailbox, typingStateIdle)
+		m.resetLocalTypingState()
+		return cmd
+	}
+	m.localTypingAt = now
+	if m.localTypingSent && m.localTypingPeer == m.recipientMailbox {
+		return nil
+	}
+	m.localTypingSent = true
+	m.localTypingPeer = m.recipientMailbox
+	return m.sendTypingCmd(m.recipientMailbox, typingStateActive)
+}
+
+func (m *Model) stopTypingCmd(recipient string) tea.Cmd {
+	if recipient == "" || !m.localTypingSent || m.localTypingPeer != recipient {
+		m.resetLocalTypingState()
+		return nil
+	}
+	cmd := m.sendTypingCmd(recipient, typingStateIdle)
+	m.resetLocalTypingState()
+	return cmd
+}
+
+func (m *Model) resetLocalTypingState() {
+	m.localTypingSent = false
+	m.localTypingPeer = ""
+	m.localTypingAt = time.Time{}
+}
+
+func (m *Model) clearPeerTyping() {
+	m.peerTyping = false
+	m.peerTypingExpiresAt = time.Time{}
+	m.typingFrame = 0
 }

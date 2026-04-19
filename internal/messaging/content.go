@@ -15,6 +15,9 @@ const (
 	contentKindText            = "text"
 	contentKindAttachmentChunk = "attachment-chunk"
 	contentKindDeliveryAck     = "delivery-ack"
+	contentKindTyping          = "typing"
+	typingStateActive          = "active"
+	typingStateIdle            = "idle"
 	attachmentTypePhoto        = "photo"
 	attachmentTypeVoice        = "voice"
 	attachmentChunkSizeBytes   = 8 * 1024
@@ -27,6 +30,12 @@ type contentPayload struct {
 	Text            string                  `json:"text,omitempty"`
 	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
 	DeliveryAck     *deliveryAck            `json:"delivery_ack,omitempty"`
+	Typing          *typingIndicator        `json:"typing,omitempty"`
+}
+
+type typingIndicator struct {
+	State     string    `json:"state"`
+	ExpiresAt time.Time `json:"expires_at,omitempty"`
 }
 
 type attachmentChunkPayload struct {
