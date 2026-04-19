@@ -69,8 +69,9 @@ pandoctl init --mailbox alice
 pandoctl invite-code --mailbox alice --copy
 pandoctl add-contact --mailbox alice --code '<bob-invite-code>'
 pandoctl list-contacts --mailbox alice
-pandoctl verify-contact --mailbox alice --contact bob --fingerprint <bob-fingerprint>
 ```
+
+`pandoctl add-contact` now verifies the imported contact automatically. If you want to import without marking the contact trusted yet, use `pandoctl import-contact` and then run `pandoctl verify-contact` later.
 
 ### Fastest way to connect
 

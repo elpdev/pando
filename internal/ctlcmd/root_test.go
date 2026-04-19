@@ -173,6 +173,9 @@ func TestRunImportContactWithStdin(t *testing.T) {
 	if contact.AccountID != "alice" {
 		t.Fatalf("expected alice contact, got %q", contact.AccountID)
 	}
+	if !contact.Verified {
+		t.Fatalf("expected add-contact to verify imported contact")
+	}
 }
 
 func TestRunImportContactWithPaste(t *testing.T) {
@@ -201,6 +204,70 @@ func TestRunImportContactWithPaste(t *testing.T) {
 
 	if _, err := bobStore.LoadContact("alice"); err != nil {
 		t.Fatalf("load imported alice contact: %v", err)
+	}
+}
+
+func TestRunImportContactLeavesContactUnverified(t *testing.T) {
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	aliceStore := store.NewClientStore(aliceDir)
+	bobStore := store.NewClientStore(bobDir)
+	aliceID, _, err := aliceStore.LoadOrCreateIdentity("alice")
+	if err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	code, err := encodeInviteCode(aliceID.InviteBundle())
+	if err != nil {
+		t.Fatalf("encode invite code: %v", err)
+	}
+
+	withPatchedStdin(t, code+"\n", func() {
+		if err := runImportContactWithName("import-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
+			t.Fatalf("import contact from stdin: %v", err)
+		}
+	})
+
+	contact, err := bobStore.LoadContact("alice")
+	if err != nil {
+		t.Fatalf("load alice contact: %v", err)
+	}
+	if contact.Verified {
+		t.Fatalf("expected import-contact to leave contact unverified")
+	}
+}
+
+func TestRunAddContactOutputShowsVerification(t *testing.T) {
+	aliceDir := t.TempDir()
+	bobDir := t.TempDir()
+	aliceStore := store.NewClientStore(aliceDir)
+	bobStore := store.NewClientStore(bobDir)
+	aliceID, _, err := aliceStore.LoadOrCreateIdentity("alice")
+	if err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	code, err := encodeInviteCode(aliceID.InviteBundle())
+	if err != nil {
+		t.Fatalf("encode invite code: %v", err)
+	}
+
+	output := captureStdout(t, func() {
+		withPatchedStdin(t, code+"\n", func() {
+			if err := runImportContactWithName("add-contact", []string{"-mailbox", "bob", "-data-dir", bobDir, "-stdin"}); err != nil {
+				t.Fatalf("add contact from stdin: %v", err)
+			}
+		})
+	})
+	if !strings.Contains(output, "verified contact alice (") {
+		t.Fatalf("expected verification confirmation in output, got %q", output)
+	}
+	if strings.Contains(output, "next: pandoctl verify-contact") {
+		t.Fatalf("expected no manual verify step in output, got %q", output)
 	}
 }
 

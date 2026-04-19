@@ -245,12 +245,19 @@ func runImportContactWithName(name string, args []string) error {
 	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
 		contact.Verified = existing.Verified
 	}
+	if name == "add-contact" {
+		contact.Verified = true
+	}
 	if err := clientStore.SaveContact(contact); err != nil {
 		return err
 	}
 	fmt.Printf("imported contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
 	fmt.Printf("fingerprint: %s\n", contact.Fingerprint())
-	fmt.Printf("next: pandoctl verify-contact --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
+	if contact.Verified {
+		fmt.Printf("verified contact %s (%s)\n", contact.AccountID, contact.Fingerprint())
+	} else {
+		fmt.Printf("next: pandoctl verify-contact --mailbox %s --contact %s --fingerprint %s\n", *mailbox, contact.AccountID, contact.Fingerprint())
+	}
 	return nil
 }
 
