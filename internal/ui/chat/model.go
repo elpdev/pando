@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -128,227 +127,29 @@ func (m *Model) SetSize(width, height int) {
 func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		if m.helpOpen {
-			return m.handleHelpKey(msg)
-		}
-		if m.filePicker.open {
-			return m, m.updateFilePicker(msg)
-		}
-		if m.addContact.open {
-			return m.handleAddContactKey(msg)
-		}
-		// Help and focus-switching live above the input so `?` always works
-		// (including while typing) and `tab` doesn't get eaten by textinput.
-		if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
-			m.helpOpen = true
-			return m, nil
-		}
-		if msg.Type == tea.KeyTab {
-			m.toggleFocus()
-			return m, nil
-		}
-		if msg.Type == tea.KeyEnd || (msg.Type == tea.KeyRunes && string(msg.Runes) == "G" && m.input.Value() == "") {
-			m.jumpToLatest()
-			return m, nil
-		}
-		if m.peerDetailOpen {
-			if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlP {
-				m.peerDetailOpen = false
-				return m, nil
-			}
-			// Absorb other keys so the chat input doesn't process them while
-			// the drawer is visible.
-			return m, nil
-		}
-		if msg.Type == tea.KeyCtrlN {
-			m.openAddContactModal()
-			return m, nil
-		}
-		// ctrl+p: "peer" — toggle the peer detail drawer. (ctrl+i is a
-		// terminal synonym for tab, so we use a different binding.)
-		if msg.Type == tea.KeyCtrlP {
-			if m.recipientMailbox != "" {
-				m.peerDetailOpen = true
-			}
-			return m, nil
-		}
-		switch msg.Type {
-		case tea.KeyUp:
-			m.moveSelection(-1)
-			return m, nil
-		case tea.KeyDown:
-			m.moveSelection(1)
-			return m, nil
-		case tea.KeyCtrlO:
-			if m.authFailed {
-				m.pushToast("cannot attach: relay auth failed; restart with --relay-token", ToastBad)
-				return m, nil
-			}
-			if m.recipientMailbox == "" {
-				m.pushToast("select a contact from the sidebar first", ToastWarn)
-				return m, nil
-			}
-			if !m.connected {
-				m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
-				return m, nil
-			}
-			if err := m.openFilePicker(); err != nil {
-				m.pushToast(fmt.Sprintf("open file picker failed: %v", err), ToastBad)
-				return m, nil
-			}
-			return m, nil
-		case tea.KeyEnter:
-			body := strings.TrimSpace(m.input.Value())
-			if body == "" {
-				previousRecipient := m.recipientMailbox
-				if !m.activateSelectedContact() {
-					return m, nil
-				}
-				return m, m.stopTypingCmd(previousRecipient)
-			}
-			if m.authFailed {
-				m.pushToast("cannot send: relay auth failed; restart with --relay-token", ToastBad)
-				return m, nil
-			}
-			if m.recipientMailbox == "" {
-				m.pushToast("select a contact from the sidebar first", ToastWarn)
-				return m, nil
-			}
-			if !m.connected {
-				m.pushToast("relay is not connected; waiting to reconnect", ToastWarn)
-				return m, nil
-			}
-			if strings.HasPrefix(body, "/send-photo") {
-				return m.handleAttachmentCommand("/send-photo", body, m.messaging.PreparePhotoOutgoing)
-			}
-			if strings.HasPrefix(body, "/send-voice") {
-				return m.handleAttachmentCommand("/send-voice", body, m.messaging.PrepareVoiceOutgoing)
-			}
-			if strings.HasPrefix(body, "/send-file") {
-				return m.handleAttachmentCommand("/send-file", body, m.messaging.PrepareFileOutgoing)
-			}
-			batch, err := m.messaging.EncryptOutgoing(m.recipientMailbox, body)
-			if err != nil {
-				m.pushToast(err.Error(), ToastBad)
-				return m, nil
-			}
-			m.appendMessageItem(messageItem{
-				direction: "outbound",
-				sender:    m.mailbox,
-				body:      body,
-				timestamp: time.Now().UTC(),
-				messageID: batchMessageID(batch),
-				status:    statusPending,
-			})
-			m.input.SetValue("")
-			m.resetLocalTypingState()
-			m.syncViewportToBottom()
-			return m, m.sendCmd(m.recipientMailbox, body, batch)
+		if next, cmd := m.handleKeyMsg(msg); next != nil {
+			return next, cmd
 		}
 	case clientEventMsg:
-		event := transport.Event(msg)
-		if event.Err != nil {
-			return m, m.handleConnectionError(event.Err)
-		}
-		if event.Message != nil {
-			m.handleProtocolMessage(*event.Message)
-		}
-		return m, m.waitForEvent()
+		return m.handleClientEventMsg(msg)
 	case connectResultMsg:
-		if msg.err != nil {
-			return m, m.handleConnectionError(msg.err)
-		}
-		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
-		return m, m.waitForEvent()
+		return m.handleConnectResultMsg(msg.err)
 	case reconnectResultMsg:
-		if msg.err != nil {
-			return m, m.handleConnectionError(msg.err)
-		}
-		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
-		return m, m.waitForEvent()
+		return m.handleConnectResultMsg(msg.err)
 	case typingTickMsg:
-		now := time.Time(msg)
-		if m.typing.peerVisible && !m.typing.peerExpiresAt.IsZero() && !now.Before(m.typing.peerExpiresAt) {
-			m.clearPeerTyping()
-		}
-		if m.toast != nil && !now.Before(m.toast.expiresAt) {
-			m.toast = nil
-		}
-		var spCmd tea.Cmd
-		if m.typing.peerVisible {
-			m.typing.spinner, spCmd = m.typing.spinner.Update(spinner.TickMsg{Time: now})
-		}
-		var cmd tea.Cmd
-		if m.typing.localSent && !m.typing.localAt.IsZero() && now.Sub(m.typing.localAt) >= typingIdleTimeout {
-			cmd = m.sendTypingCmd(m.typing.localPeer, messaging.TypingStateIdle)
-			m.resetLocalTypingState()
-		}
-		return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
+		return m.handleTypingTickMsg(msg)
 	case sendResultMsg:
-		if msg.err != nil {
-			m.updateMessageStatus(msg.messageID, statusFailed)
-			m.syncViewport()
-			m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
-			return m, nil
-		}
-		if err := m.messaging.SaveSent(msg.recipient, msg.messageID, msg.body); err != nil {
-			m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
-			return m, nil
-		}
-		if msg.recipient == m.recipientMailbox {
-			if !m.updateMessageStatus(msg.messageID, statusSent) {
-				// Optimistic item wasn't found (e.g. the chat changed mid-send);
-				// fall back to a full reload from disk.
-				m.loadHistory()
-			}
-			m.syncViewport()
-		}
-		return m, nil
+		return m.handleSendResultMsg(msg)
 	case typingSendResultMsg:
-		if msg.err != nil {
-			m.pushToast(fmt.Sprintf("typing indicator failed: %v", msg.err), ToastBad)
-		}
-		return m, nil
+		return m.handleTypingSendResultMsg(msg)
 	case addContactResultMsg:
-		m.addContact.busy = false
-		m.addContact.cancel = nil
-		if msg.err != nil {
-			m.addContact.error = msg.err.Error()
-			return m, nil
-		}
-		m.finishAddContact(msg.contact, fmt.Sprintf("added verified contact %s", msg.contact.AccountID))
-		return m, nil
+		return m.handleAddContactResultMsg(msg)
 	case lookupContactResultMsg:
-		m.addContact.busy = false
-		m.addContact.cancel = nil
-		if msg.err != nil {
-			m.addContact.error = msg.err.Error()
-			return m, nil
-		}
-		m.finishAddContact(msg.contact, fmt.Sprintf("added relay-directory contact %s", msg.contact.AccountID))
-		return m, nil
+		return m.handleLookupContactResultMsg(msg)
 	case inviteExchangeResultMsg:
-		m.addContact.busy = false
-		m.addContact.cancel = nil
-		if msg.cancelled {
-			m.addContact.error = "cancelled"
-			return m, nil
-		}
-		if msg.err != nil {
-			m.addContact.error = msg.err.Error()
-			return m, nil
-		}
-		m.finishAddContact(msg.contact, fmt.Sprintf("added invite-code contact %s", msg.contact.AccountID))
-		return m, nil
+		return m.handleInviteExchangeResultMsg(msg)
 	case inviteStartedMsg:
-		if msg.err != nil {
-			m.addContact.busy = false
-			m.addContact.cancel = nil
-			m.addContact.error = msg.err.Error()
-			return m, nil
-		}
-		m.addContact.code = msg.code
-		return m, nil
+		return m.handleInviteStartedMsg(msg)
 	}
 
 	previousValue := m.input.Value()

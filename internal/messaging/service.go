@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
-	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/session"
@@ -84,83 +82,6 @@ func (s *Service) Contacts() ([]identity.Contact, error) {
 	return s.store.ListContacts()
 }
 
-func (s *Service) ImportContactInviteText(text string, verified bool) (*identity.Contact, error) {
-	bundle, err := invite.DecodeText(text)
-	if err != nil {
-		return nil, err
-	}
-	trustSource := identity.TrustSourceUnverified
-	if verified {
-		trustSource = identity.TrustSourceManualVerified
-	}
-	return s.ImportContactInviteBundle(*bundle, trustSource)
-}
-
-// PreviewContactInviteText parses an invite text into a Contact without
-// saving it. Used by the add-contact modal to show the user what they're
-// about to import before committing.
-func (s *Service) PreviewContactInviteText(text string) (*identity.Contact, error) {
-	bundle, err := invite.DecodeText(text)
-	if err != nil {
-		return nil, err
-	}
-	contact, err := identity.ContactFromInvite(*bundle)
-	if err != nil {
-		return nil, err
-	}
-	return contact, nil
-}
-
-func (s *Service) ImportContactInviteBundle(bundle identity.InviteBundle, trustSource string) (*identity.Contact, error) {
-	contact, err := identity.ContactFromInvite(bundle)
-	if err != nil {
-		return nil, err
-	}
-	if existing, loadErr := s.store.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
-		contact.Verified = existing.Verified
-		contact.TrustSource = existing.TrustSource
-	}
-	if identity.TrustRank(trustSource) > identity.TrustRank(contact.TrustSource) {
-		contact.TrustSource = trustSource
-	}
-	if identity.TrustRank(contact.TrustSource) >= identity.TrustRank(identity.TrustSourceInviteCode) {
-		contact.Verified = true
-	}
-	contact.NormalizeTrust()
-	if err := s.store.SaveContact(contact); err != nil {
-		return nil, err
-	}
-	return contact, nil
-}
-
-// ImportDirectoryContact looks up a mailbox in the trusted relay directory,
-// verifies the signature, and saves the result as a verified contact with
-// trust source "relay-directory". Used by both the CLI `contact lookup`
-// command and the TUI add-contact modal so the trust-rank logic lives in one
-// place.
-func (s *Service) ImportDirectoryContact(client DirectoryClient, mailbox string) (*identity.Contact, error) {
-	if client == nil {
-		return nil, fmt.Errorf("relay client is required")
-	}
-	if strings.TrimSpace(mailbox) == "" {
-		return nil, fmt.Errorf("mailbox is required")
-	}
-	entry, err := client.LookupDirectoryEntry(mailbox)
-	if err != nil {
-		return nil, err
-	}
-	if err := relayapi.VerifySignedDirectoryEntry(*entry); err != nil {
-		return nil, err
-	}
-	return s.ImportContactInviteBundle(entry.Entry.Bundle, identity.TrustSourceRelayDirectory)
-}
-
-// ImportInviteCodeContact saves a contact obtained via the short-code
-// rendezvous flow with trust source "invite-code".
-func (s *Service) ImportInviteCodeContact(bundle identity.InviteBundle) (*identity.Contact, error) {
-	return s.ImportContactInviteBundle(bundle, identity.TrustSourceInviteCode)
-}
-
 func (s *Service) Devices() ([]identity.Device, error) {
 	if err := s.identity.Validate(); err != nil {
 		return nil, err
@@ -222,18 +143,6 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBat
 	return &OutgoingBatch{MessageID: messageID, Envelopes: append(updateEnvelopes, chatEnvelopes...)}, nil
 }
 
-func (s *Service) PreparePhotoOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypePhoto)
-}
-
-func (s *Service) PrepareVoiceOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeVoice)
-}
-
-func (s *Service) PrepareFileOutgoing(recipientAccountID, path string) (*OutgoingBatch, string, error) {
-	return s.prepareAttachmentOutgoing(recipientAccountID, path, attachmentTypeFile)
-}
-
 func (s *Service) TypingEnvelopes(recipientAccountID, state string) ([]protocol.Envelope, error) {
 	switch state {
 	case typingStateActive, typingStateIdle:
@@ -256,43 +165,6 @@ func (s *Service) TypingEnvelopes(recipientAccountID, state string) ([]protocol.
 		return nil, fmt.Errorf("encode typing payload: %w", err)
 	}
 	return session.Encrypt(s.identity, contact, string(body))
-}
-
-func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachmentType string) (*OutgoingBatch, string, error) {
-	contact, err := s.store.LoadContact(recipientAccountID)
-	if err != nil {
-		if err == store.ErrNotFound {
-			return nil, "", missingContactError(recipientAccountID)
-		}
-		return nil, "", err
-	}
-	bytes, err := os.ReadFile(path)
-	if err != nil {
-		return nil, "", fmt.Errorf("read %s: %w", AttachmentLabel(attachmentType), err)
-	}
-	filename := filepath.Base(path)
-	mimeType := detectAttachmentMIMEType(filename, bytes, attachmentType)
-	if err := validateAttachmentMIMEType(path, mimeType, attachmentType); err != nil {
-		return nil, "", err
-	}
-	payloads, _, err := buildAttachmentChunkPayloads(attachmentType, filename, mimeType, bytes)
-	if err != nil {
-		return nil, "", err
-	}
-	updateEnvelopes, err := s.contactUpdateEnvelopes(contact)
-	if err != nil {
-		return nil, "", err
-	}
-	envelopes := make([]protocol.Envelope, 0, len(updateEnvelopes)+(len(payloads)*len(contact.ActiveDevices())))
-	envelopes = append(envelopes, updateEnvelopes...)
-	for _, payload := range payloads {
-		chunkEnvelopes, err := session.Encrypt(s.identity, contact, payload)
-		if err != nil {
-			return nil, "", err
-		}
-		envelopes = append(envelopes, chunkEnvelopes...)
-	}
-	return &OutgoingBatch{Envelopes: envelopes}, fmt.Sprintf("%s sent: %s", AttachmentLabel(attachmentType), sanitizeAttachmentName(filename)), nil
 }
 
 func missingContactError(recipientAccountID string) error {
