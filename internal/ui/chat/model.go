@@ -62,6 +62,7 @@ type Model struct {
 }
 
 type clientEventMsg transport.Event
+type connectResultMsg struct{ err error }
 type reconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
@@ -211,6 +212,26 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.handleProtocolMessage(*event.Message)
 		}
 		return m, m.waitForEvent()
+	case connectResultMsg:
+		if msg.err != nil {
+			if transport.IsUnauthorized(msg.err) {
+				m.handleAuthFailure(msg.err)
+				return m, nil
+			}
+			m.status = fmt.Sprintf("disconnected: %v", msg.err)
+			m.disconnected = true
+			m.connected = false
+			m.resetLocalTypingState()
+			return m, m.reconnectCmd()
+		}
+		m.connecting = false
+		m.connected = true
+		m.authFailed = false
+		m.disconnected = false
+		m.reconnectAttempt = 0
+		m.syncInputPlaceholder()
+		m.status = fmt.Sprintf("connected to relay, subscribed as %s", m.mailbox)
+		return m, m.waitForEvent()
 	case reconnectResultMsg:
 		if msg.err != nil {
 			if transport.IsUnauthorized(msg.err) {
@@ -222,7 +243,13 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 			m.resetLocalTypingState()
 			return m, m.reconnectCmd()
 		}
-		m.status = fmt.Sprintf("reconnected to %s, waiting for subscribe ack", m.relayURL)
+		m.connecting = false
+		m.connected = true
+		m.authFailed = false
+		m.disconnected = false
+		m.reconnectAttempt = 0
+		m.syncInputPlaceholder()
+		m.status = fmt.Sprintf("reconnected to %s and resubscribed as %s", m.relayURL, m.mailbox)
 		return m, m.waitForEvent()
 	case typingTickMsg:
 		now := time.Time(msg)
@@ -407,9 +434,9 @@ func (m *Model) connectCmd() tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := m.client.Connect(ctx); err != nil {
-			return clientEventMsg(transport.Event{Err: err})
+			return connectResultMsg{err: err}
 		}
-		return nil
+		return connectResultMsg{}
 	}
 }
 

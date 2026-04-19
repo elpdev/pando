@@ -209,6 +209,49 @@ func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
 	}
 }
 
+func TestSuccessfulConnectMarksModelConnectedWithoutAckEvent(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+
+	cmd := model.connectCmd()
+	if cmd == nil {
+		t.Fatal("expected connect command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected connect result message")
+	}
+	updated, followup := model.Update(msg)
+	if updated != model {
+		t.Fatal("expected model to update in place")
+	}
+	if followup == nil {
+		t.Fatal("expected wait-for-event follow-up command")
+	}
+	if !model.connected {
+		t.Fatal("expected model to be connected after successful connect")
+	}
+	if model.connecting {
+		t.Fatal("expected connecting state to clear")
+	}
+	if model.status != "connected to relay, subscribed as alice" {
+		t.Fatalf("unexpected status: %q", model.status)
+	}
+	if model.input.Placeholder != "Select a contact to start chatting" {
+		t.Fatalf("unexpected placeholder: %q", model.input.Placeholder)
+	}
+}
+
 func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")
