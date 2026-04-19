@@ -64,18 +64,7 @@ func (s *ClientStore) writeSeenEnvelopeIDs(id *identity.Identity, seen map[strin
 	for envelopeID := range seen {
 		ids = append(ids, envelopeID)
 	}
-	plaintext, err := json.Marshal(ids)
-	if err != nil {
-		return fmt.Errorf("encode seen envelopes: %w", err)
-	}
-	sealed, err := encryptStorePayload(id, plaintext)
-	if err != nil {
-		return fmt.Errorf("encrypt seen envelopes: %w", err)
-	}
-	if err := os.WriteFile(s.seenEnvelopesPath(), sealed, 0o600); err != nil {
-		return fmt.Errorf("write seen envelopes: %w", err)
-	}
-	return nil
+	return writeEncryptedJSON(id, s.seenEnvelopesPath(), ids, "encode seen envelopes", "encrypt seen envelopes", "write seen envelopes", false)
 }
 
 func (s *ClientStore) seenEnvelopesPath() string {

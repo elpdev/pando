@@ -109,3 +109,14 @@ func writeJSON(file *os.File, value any) error {
 	encoder.SetIndent("", "  ")
 	return encoder.Encode(value)
 }
+
+func writeJSONOutput(path string, value any) error {
+	if path == "" {
+		return writeJSON(os.Stdout, value)
+	}
+	bytes, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, bytes, 0o600)
+}

@@ -1,7 +1,6 @@
 package ctlcmd
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 
@@ -95,18 +94,7 @@ func runExportInvite(args []string) error {
 		return err
 	}
 	bundle := id.InviteBundle()
-	bytes, err := json.MarshalIndent(bundle, "", "  ")
-	if err != nil {
-		return err
-	}
-	if *outputPath == "" {
-		_, err = os.Stdout.Write(bytes)
-		if err == nil {
-			_, err = os.Stdout.Write([]byte("\n"))
-		}
-		return err
-	}
-	return os.WriteFile(*outputPath, bytes, 0o600)
+	return writeJSONOutput(*outputPath, bundle)
 }
 
 func runInviteCode(args []string) error {

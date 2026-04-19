@@ -84,19 +84,7 @@ func runCreateEnrollment(args []string) error {
 	if err := clientStore.SavePendingEnrollment(pending); err != nil {
 		return err
 	}
-	request := pending.Request()
-	bytes, err := json.MarshalIndent(request, "", "  ")
-	if err != nil {
-		return err
-	}
-	if *outputPath == "" {
-		_, err = os.Stdout.Write(bytes)
-		if err == nil {
-			_, err = os.Stdout.Write([]byte("\n"))
-		}
-		return err
-	}
-	return os.WriteFile(*outputPath, bytes, 0o600)
+	return writeJSONOutput(*outputPath, pending.Request())
 }
 
 func runApproveEnrollment(args []string) error {
@@ -133,18 +121,7 @@ func runApproveEnrollment(args []string) error {
 	if err := clientStore.SaveIdentity(id); err != nil {
 		return err
 	}
-	approvalBytes, err := json.MarshalIndent(approval, "", "  ")
-	if err != nil {
-		return err
-	}
-	if *outputPath == "" {
-		_, err = os.Stdout.Write(approvalBytes)
-		if err == nil {
-			_, err = os.Stdout.Write([]byte("\n"))
-		}
-		return err
-	}
-	return os.WriteFile(*outputPath, approvalBytes, 0o600)
+	return writeJSONOutput(*outputPath, approval)
 }
 
 func runCompleteEnrollment(args []string) error {

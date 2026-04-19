@@ -397,7 +397,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	service.incomingAttachments = map[string]*incomingAttachment{
+	service.incomingAttachments = &incomingAttachmentAssembler{store: service.store, pending: map[string]*incomingAttachment{
 		"alice:stale": {
 			attachmentType: attachmentTypePhoto,
 			filename:       "stale.png",
@@ -406,7 +406,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 			chunks:         make([][]byte, 1),
 			updatedAt:      time.Now().UTC().Add(-incomingAttachmentTTL - time.Minute),
 		},
-	}
+	}}
 	_, done, err := service.handleIncomingAttachmentChunk("alice", &attachmentChunkPayload{
 		AttachmentType: attachmentTypePhoto,
 		AttachmentID:   "fresh",
@@ -423,7 +423,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 	if !done {
 		t.Fatal("expected single-chunk attachment to complete")
 	}
-	if _, ok := service.incomingAttachments["alice:stale"]; ok {
+	if _, ok := service.incomingAttachments.pending["alice:stale"]; ok {
 		t.Fatal("expected stale transfer to be removed")
 	}
 }

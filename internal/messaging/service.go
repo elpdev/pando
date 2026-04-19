@@ -1,7 +1,6 @@
 package messaging
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"mime"
@@ -59,7 +58,7 @@ type OutgoingBatch struct {
 type Service struct {
 	store               *store.ClientStore
 	identity            *identity.Identity
-	incomingAttachments map[string]*incomingAttachment
+	incomingAttachments *incomingAttachmentAssembler
 }
 
 func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
@@ -70,7 +69,7 @@ func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
 	if err := id.Validate(); err != nil {
 		return nil, false, err
 	}
-	return &Service{store: store, identity: id, incomingAttachments: make(map[string]*incomingAttachment)}, created, nil
+	return &Service{store: store, identity: id, incomingAttachments: newIncomingAttachmentAssembler(store)}, created, nil
 }
 
 func (s *Service) Identity() *identity.Identity {
@@ -312,11 +311,8 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		return nil, err
 	}
 
-	contact, err := s.store.LoadContactByDeviceMailbox(envelope.SenderMailbox)
+	contact, err := s.resolveIncomingSender(envelope.SenderMailbox)
 	if err != nil {
-		if err == store.ErrNotFound {
-			return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
-		}
 		return nil, err
 	}
 
@@ -335,32 +331,14 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 	if err != nil {
 		return nil, err
 	}
-	if ok && payload.Kind == contentKindAttachmentChunk {
-		message, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
+	if ok {
+		result, handled, err := s.handleIncomingPayload(contact, payload)
 		if err != nil {
 			return nil, err
 		}
-		if !done {
-			return &IncomingResult{Control: true, PeerAccountID: contact.AccountID}, nil
+		if handled {
+			return result, nil
 		}
-		return &IncomingResult{PeerAccountID: contact.AccountID, Body: message}, nil
-	}
-	if ok && payload.Kind == contentKindDeliveryAck {
-		ack, err := s.parseDeliveryAckPayload(payload)
-		if err != nil {
-			return nil, err
-		}
-		if err := s.MarkDelivered(contact.AccountID, ack.MessageID, ack.DeliveredAt); err != nil {
-			return nil, err
-		}
-		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, nil
-	}
-	if ok && payload.Kind == contentKindTyping {
-		typing, err := s.parseTypingPayload(payload)
-		if err != nil {
-			return nil, err
-		}
-		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, TypingState: typing.State, TypingExpiresAt: typing.ExpiresAt}, nil
 	}
 	ackEnvelopes, err := s.deliveryAckEnvelopes(envelope)
 	if err != nil {
@@ -369,95 +347,53 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 	return &IncomingResult{PeerAccountID: contact.AccountID, Body: body, MessageID: envelope.ClientMessageID, AckEnvelopes: ackEnvelopes}, nil
 }
 
+func (s *Service) resolveIncomingSender(senderMailbox string) (*identity.Contact, error) {
+	contact, err := s.store.LoadContactByDeviceMailbox(senderMailbox)
+	if err != nil {
+		if err == store.ErrNotFound {
+			return nil, fmt.Errorf("no contact device for sender mailbox %q", senderMailbox)
+		}
+		return nil, err
+	}
+	return contact, nil
+}
+
+func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *contentPayload) (*IncomingResult, bool, error) {
+	switch payload.Kind {
+	case contentKindAttachmentChunk:
+		message, done, err := s.handleIncomingAttachmentChunk(contact.AccountID, payload.AttachmentChunk)
+		if err != nil {
+			return nil, true, err
+		}
+		if !done {
+			return &IncomingResult{Control: true, PeerAccountID: contact.AccountID}, true, nil
+		}
+		return &IncomingResult{PeerAccountID: contact.AccountID, Body: message}, true, nil
+	case contentKindDeliveryAck:
+		ack, err := s.parseDeliveryAckPayload(payload)
+		if err != nil {
+			return nil, true, err
+		}
+		if err := s.MarkDelivered(contact.AccountID, ack.MessageID, ack.DeliveredAt); err != nil {
+			return nil, true, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, MessageID: ack.MessageID}, true, nil
+	case contentKindTyping:
+		typing, err := s.parseTypingPayload(payload)
+		if err != nil {
+			return nil, true, err
+		}
+		return &IncomingResult{Control: true, PeerAccountID: contact.AccountID, TypingState: typing.State, TypingExpiresAt: typing.ExpiresAt}, true, nil
+	default:
+		return nil, false, nil
+	}
+}
+
 func (s *Service) handleIncomingAttachmentChunk(peerAccountID string, chunk *attachmentChunkPayload) (string, bool, error) {
 	if s.incomingAttachments == nil {
-		s.incomingAttachments = make(map[string]*incomingAttachment)
+		s.incomingAttachments = newIncomingAttachmentAssembler(s.store)
 	}
-	now := time.Now().UTC()
-	s.cleanupIncomingAttachments(now)
-	if chunk == nil {
-		return "", false, fmt.Errorf("attachment payload is required")
-	}
-	if chunk.AttachmentType != attachmentTypePhoto && chunk.AttachmentType != attachmentTypeVoice && chunk.AttachmentType != attachmentTypeFile {
-		return "", false, fmt.Errorf("invalid attachment payload type")
-	}
-	if chunk.AttachmentID == "" || chunk.Filename == "" || chunk.TotalSize <= 0 || chunk.TotalSize > maxAttachmentSizeBytes || chunk.ChunkCount <= 0 || chunk.ChunkCount > maxAttachmentChunkCount || chunk.ChunkIndex < 0 || chunk.ChunkIndex >= chunk.ChunkCount {
-		return "", false, fmt.Errorf("invalid attachment payload metadata")
-	}
-	bytes, err := base64.StdEncoding.DecodeString(chunk.Data)
-	if err != nil {
-		return "", false, fmt.Errorf("decode attachment chunk: %w", err)
-	}
-	if len(bytes) == 0 || len(bytes) > attachmentChunkSizeBytes {
-		return "", false, fmt.Errorf("invalid attachment chunk size")
-	}
-	key := peerAccountID + ":" + chunk.AttachmentID
-	pending, ok := s.incomingAttachments[key]
-	if !ok {
-		if len(s.incomingAttachments) >= maxPendingIncomingAttachments {
-			return "", false, fmt.Errorf("too many pending attachments")
-		}
-		if s.pendingAttachmentCount(peerAccountID) >= maxPendingIncomingAttachmentsPeer {
-			return "", false, fmt.Errorf("too many pending attachments for peer %s", peerAccountID)
-		}
-		pending = &incomingAttachment{
-			attachmentType: chunk.AttachmentType,
-			filename:       sanitizeAttachmentName(chunk.Filename),
-			mimeType:       chunk.MIMEType,
-			totalSize:      chunk.TotalSize,
-			chunkCount:     chunk.ChunkCount,
-			chunks:         make([][]byte, chunk.ChunkCount),
-			updatedAt:      now,
-		}
-		s.incomingAttachments[key] = pending
-	}
-	if pending.attachmentType != chunk.AttachmentType || pending.chunkCount != chunk.ChunkCount || pending.totalSize != chunk.TotalSize || pending.filename != sanitizeAttachmentName(chunk.Filename) {
-		delete(s.incomingAttachments, key)
-		return "", false, fmt.Errorf("attachment payload does not match existing transfer")
-	}
-	pending.updatedAt = now
-	if pending.chunks[chunk.ChunkIndex] == nil {
-		pending.chunks[chunk.ChunkIndex] = bytes
-		pending.received++
-	}
-	if pending.received != pending.chunkCount {
-		return "", false, nil
-	}
-	assembled := make([]byte, 0, pending.totalSize)
-	for _, part := range pending.chunks {
-		if part == nil {
-			return "", false, fmt.Errorf("attachment transfer is missing chunks")
-		}
-		assembled = append(assembled, part...)
-	}
-	if pending.totalSize > 0 && len(assembled) != pending.totalSize {
-		return "", false, fmt.Errorf("attachment transfer size mismatch")
-	}
-	path, err := s.store.SaveAttachment(peerAccountID, chunk.AttachmentID, pending.filename, assembled)
-	if err != nil {
-		return "", false, err
-	}
-	delete(s.incomingAttachments, key)
-	return fmt.Sprintf("%s received: %s saved to %s", AttachmentLabel(pending.attachmentType), pending.filename, path), true, nil
-}
-
-func (s *Service) cleanupIncomingAttachments(now time.Time) {
-	for key, pending := range s.incomingAttachments {
-		if pending == nil || now.Sub(pending.updatedAt) > incomingAttachmentTTL {
-			delete(s.incomingAttachments, key)
-		}
-	}
-}
-
-func (s *Service) pendingAttachmentCount(peerAccountID string) int {
-	count := 0
-	prefix := peerAccountID + ":"
-	for key := range s.incomingAttachments {
-		if strings.HasPrefix(key, prefix) {
-			count++
-		}
-	}
-	return count
+	return s.incomingAttachments.handleChunk(peerAccountID, chunk)
 }
 
 func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {

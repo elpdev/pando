@@ -268,69 +268,88 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			s.writeClientError(current, conn, genericClientError)
 			continue
 		}
-
-		switch msg.Type {
-		case protocol.MessageTypeSubscribe:
-			now := time.Now().UTC()
-			if !s.limiter.Allow("subscribe:"+r.RemoteAddr, now) {
-				s.writeClientError(current, conn, "relay rate limit exceeded")
-				continue
-			}
-			if err := s.verifySubscribeRequest(*msg.Subscribe, challenge, now); err != nil {
-				s.logger.Warn("reject subscribe request", "mailbox", msg.Subscribe.Mailbox, "error", err)
-				s.writeClientError(current, conn, genericClientError)
-				challenge = newSubscribeChallenge(now)
-				s.writeConn(current, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: challenge})
-				continue
-			}
-			challenge = nil
-			if current != nil {
-				s.unregister(current)
-			}
-
-			current = &subscriber{conn: conn, mailbox: msg.Subscribe.Mailbox}
-			backlog, err := s.register(current)
-			if err != nil {
-				s.logger.Warn("register subscriber", "mailbox", msg.Subscribe.Mailbox, "error", err)
-				s.writeClientError(current, conn, genericClientError)
-				continue
-			}
-			s.writeSubscriber(current, protocol.Message{
-				Type: protocol.MessageTypeAck,
-				Ack:  &protocol.Ack{ID: current.mailbox},
-			})
-			for _, envelope := range backlog {
-				s.writeSubscriber(current, protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelope})
-			}
-		case protocol.MessageTypePublish:
-			envelope := msg.Publish.Envelope
-			now := time.Now().UTC()
-			if err := validateEnvelopeLimits(envelope, s.options); err != nil {
-				s.logger.Warn("reject oversized envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
-				s.writeClientError(current, conn, genericClientError)
-				continue
-			}
-			if !s.limiter.Allow(envelope.SenderMailbox, now) {
-				s.writeClientError(current, conn, "relay rate limit exceeded")
-				continue
-			}
-			envelope.ID = uuid.NewString()
-			envelope.Timestamp = now
-			envelope.ExpiresAt = now.Add(s.options.QueueTTL)
-			if err := s.publish(envelope); err != nil {
-				if errors.Is(err, ErrQueueFull) {
-					s.writeClientError(current, conn, "mailbox queue is full")
-					continue
-				}
-				s.logger.Warn("publish envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
-				s.writeClientError(current, conn, genericClientError)
-				continue
-			}
-			s.writeConn(current, conn, protocol.Message{
-				Type: protocol.MessageTypeAck,
-				Ack:  &protocol.Ack{ID: envelope.ID},
-			})
+		if err := s.handleWebSocketMessage(conn, r.RemoteAddr, &current, &challenge, msg); err != nil {
+			continue
 		}
+	}
+}
+
+func (s *Server) handleWebSocketMessage(conn *websocket.Conn, remoteAddr string, current **subscriber, challenge **protocol.SubscribeChallenge, msg protocol.Message) error {
+	switch msg.Type {
+	case protocol.MessageTypeSubscribe:
+		return s.handleSubscribeMessage(conn, remoteAddr, current, challenge, *msg.Subscribe)
+	case protocol.MessageTypePublish:
+		return s.handlePublishMessage(conn, current, msg.Publish.Envelope)
+	default:
+		return nil
+	}
+}
+
+func (s *Server) handleSubscribeMessage(conn *websocket.Conn, remoteAddr string, current **subscriber, challenge **protocol.SubscribeChallenge, req protocol.SubscribeRequest) error {
+	now := time.Now().UTC()
+	if !s.limiter.Allow("subscribe:"+remoteAddr, now) {
+		s.writeClientError(*current, conn, "relay rate limit exceeded")
+		return fmt.Errorf("subscribe rate limited")
+	}
+	if err := s.verifySubscribeRequest(req, *challenge, now); err != nil {
+		s.logger.Warn("reject subscribe request", "mailbox", req.Mailbox, "error", err)
+		s.writeClientError(*current, conn, genericClientError)
+		*challenge = newSubscribeChallenge(now)
+		s.writeConn(*current, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: *challenge})
+		return err
+	}
+	*challenge = nil
+	if *current != nil {
+		s.unregister(*current)
+	}
+
+	next := &subscriber{conn: conn, mailbox: req.Mailbox}
+	backlog, err := s.register(next)
+	if err != nil {
+		s.logger.Warn("register subscriber", "mailbox", req.Mailbox, "error", err)
+		s.writeClientError(*current, conn, genericClientError)
+		return err
+	}
+	*current = next
+	s.ackSubscriber(next)
+	s.writeBacklog(next, backlog)
+	return nil
+}
+
+func (s *Server) handlePublishMessage(conn *websocket.Conn, current **subscriber, envelope protocol.Envelope) error {
+	now := time.Now().UTC()
+	if err := validateEnvelopeLimits(envelope, s.options); err != nil {
+		s.logger.Warn("reject oversized envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+		s.writeClientError(*current, conn, genericClientError)
+		return err
+	}
+	if !s.limiter.Allow(envelope.SenderMailbox, now) {
+		s.writeClientError(*current, conn, "relay rate limit exceeded")
+		return fmt.Errorf("publish rate limited")
+	}
+	envelope.ID = uuid.NewString()
+	envelope.Timestamp = now
+	envelope.ExpiresAt = now.Add(s.options.QueueTTL)
+	if err := s.publish(envelope); err != nil {
+		if errors.Is(err, ErrQueueFull) {
+			s.writeClientError(*current, conn, "mailbox queue is full")
+			return err
+		}
+		s.logger.Warn("publish envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+		s.writeClientError(*current, conn, genericClientError)
+		return err
+	}
+	s.writeConn(*current, conn, protocol.Message{Type: protocol.MessageTypeAck, Ack: &protocol.Ack{ID: envelope.ID}})
+	return nil
+}
+
+func (s *Server) ackSubscriber(sub *subscriber) {
+	s.writeSubscriber(sub, protocol.Message{Type: protocol.MessageTypeAck, Ack: &protocol.Ack{ID: sub.mailbox}})
+}
+
+func (s *Server) writeBacklog(sub *subscriber, backlog []protocol.Envelope) {
+	for _, envelope := range backlog {
+		s.writeSubscriber(sub, protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelope})
 	}
 }
 
