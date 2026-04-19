@@ -71,6 +71,13 @@ jobs:
           default_bump: patch
           initial_version: 0.1.0
 
+      - name: Fetch tags for changelog range
+        if: steps.changes.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --force --tags origin
+
       - name: Run GoReleaser
         if: steps.changes.outputs.should_release == 'true'
         uses: goreleaser/goreleaser-action@v6
