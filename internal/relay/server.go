@@ -249,17 +249,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 
 	defer conn.Close()
-	challenge := newSubscribeChallenge(time.Now().UTC())
-	s.writeConn(nil, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: challenge})
+	challenge := s.startWebSocketSession(conn)
 
 	var current *subscriber
 	for {
 		var msg protocol.Message
 		if err := conn.ReadJSON(&msg); err != nil {
-			if current != nil {
-				s.unregister(current)
-			}
-			s.logger.Info("client disconnected")
+			s.closeWebSocketSession(current)
 			return
 		}
 
@@ -272,6 +268,19 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 	}
+}
+
+func (s *Server) startWebSocketSession(conn *websocket.Conn) *protocol.SubscribeChallenge {
+	challenge := newSubscribeChallenge(time.Now().UTC())
+	s.writeConn(nil, conn, protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: challenge})
+	return challenge
+}
+
+func (s *Server) closeWebSocketSession(current *subscriber) {
+	if current != nil {
+		s.unregister(current)
+	}
+	s.logger.Info("client disconnected")
 }
 
 func (s *Server) handleWebSocketMessage(conn *websocket.Conn, remoteAddr string, current **subscriber, challenge **protocol.SubscribeChallenge, msg protocol.Message) error {
@@ -327,9 +336,7 @@ func (s *Server) handlePublishMessage(conn *websocket.Conn, current **subscriber
 		s.writeClientError(*current, conn, "relay rate limit exceeded")
 		return fmt.Errorf("publish rate limited")
 	}
-	envelope.ID = uuid.NewString()
-	envelope.Timestamp = now
-	envelope.ExpiresAt = now.Add(s.options.QueueTTL)
+	envelope = s.finalizePublishedEnvelope(envelope, now)
 	if err := s.publish(envelope); err != nil {
 		if errors.Is(err, ErrQueueFull) {
 			s.writeClientError(*current, conn, "mailbox queue is full")
@@ -341,6 +348,13 @@ func (s *Server) handlePublishMessage(conn *websocket.Conn, current **subscriber
 	}
 	s.writeConn(*current, conn, protocol.Message{Type: protocol.MessageTypeAck, Ack: &protocol.Ack{ID: envelope.ID}})
 	return nil
+}
+
+func (s *Server) finalizePublishedEnvelope(envelope protocol.Envelope, now time.Time) protocol.Envelope {
+	envelope.ID = uuid.NewString()
+	envelope.Timestamp = now
+	envelope.ExpiresAt = now.Add(s.options.QueueTTL)
+	return envelope
 }
 
 func (s *Server) ackSubscriber(sub *subscriber) {
