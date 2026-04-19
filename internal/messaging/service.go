@@ -151,15 +151,7 @@ func (s *Service) prepareAttachmentOutgoing(recipientAccountID, path, attachment
 		return nil, "", fmt.Errorf("read %s: %w", attachmentLabel(attachmentType), err)
 	}
 	filename := filepath.Base(path)
-	mimeType := http.DetectContentType(bytes)
-	if mimeType == "application/octet-stream" {
-		ext := strings.ToLower(filepath.Ext(filename))
-		if ext != "" {
-			if byExt := mime.TypeByExtension(ext); byExt != "" {
-				mimeType = byExt
-			}
-		}
-	}
+	mimeType := detectAttachmentMIMEType(filename, bytes, attachmentType)
 	if err := validateAttachmentMIMEType(path, mimeType, attachmentType); err != nil {
 		return nil, "", err
 	}
@@ -323,6 +315,20 @@ func validateAttachmentMIMEType(path, mimeType, attachmentType string) error {
 	default:
 		return fmt.Errorf("unsupported attachment type %q", attachmentType)
 	}
+}
+
+func detectAttachmentMIMEType(filename string, bytes []byte, attachmentType string) string {
+	mimeType := http.DetectContentType(bytes)
+	ext := strings.ToLower(filepath.Ext(filename))
+	if attachmentType == attachmentTypeVoice && ext == ".m4a" && (mimeType == "application/octet-stream" || mimeType == "application/mp4" || mimeType == "video/mp4") {
+		return "audio/mp4"
+	}
+	if mimeType == "application/octet-stream" && ext != "" {
+		if byExt := mime.TypeByExtension(ext); byExt != "" {
+			return byExt
+		}
+	}
+	return mimeType
 }
 
 func attachmentLabel(attachmentType string) string {

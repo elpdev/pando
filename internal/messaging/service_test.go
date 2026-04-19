@@ -490,6 +490,42 @@ func TestVoiceChunkRoundTripStoresAttachment(t *testing.T) {
 	}
 }
 
+func TestPrepareVoiceOutgoingAcceptsM4AExtension(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	voicePath := filepath.Join(t.TempDir(), "voice memo.m4a")
+	if err := os.WriteFile(voicePath, mustM4ABytes(), 0o600); err != nil {
+		t.Fatalf("write m4a fixture: %v", err)
+	}
+
+	batch, displayBody, err := aliceService.PrepareVoiceOutgoing("bob", voicePath)
+	if err != nil {
+		t.Fatalf("prepare m4a voice outgoing: %v", err)
+	}
+	if batch == nil || len(batch.Envelopes) == 0 {
+		t.Fatalf("expected outgoing envelopes, got %+v", batch)
+	}
+	if displayBody != "voice note sent: voice memo.m4a" {
+		t.Fatalf("unexpected voice display body: %q", displayBody)
+	}
+}
+
 func TestBackToBackLargePhotoTransfersStayUnderRateLimit(t *testing.T) {
 	server := httptest.NewServer(relay.NewServer(slog.New(slog.NewTextHandler(testWriter{}, nil)), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
 	defer server.Close()
@@ -616,6 +652,17 @@ func mustVoiceBytes(t *testing.T) []byte {
 		0x80, 0x3e, 0x00, 0x00,
 		0x02, 0x00, 0x10, 0x00,
 		'd', 'a', 't', 'a', 0x00, 0x08, 0x00, 0x00,
+	}
+}
+
+func mustM4ABytes() []byte {
+	return []byte{
+		0x00, 0x00, 0x00, 0x18,
+		'f', 't', 'y', 'p',
+		'M', '4', 'A', ' ',
+		0x00, 0x00, 0x00, 0x00,
+		'M', '4', 'A', ' ',
+		'i', 's', 'o', 'm',
 	}
 }
 

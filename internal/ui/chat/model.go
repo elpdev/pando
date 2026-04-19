@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -131,7 +132,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				return m, nil
 			}
 			if strings.HasPrefix(body, "/send-photo") {
-				path := strings.TrimSpace(strings.TrimPrefix(body, "/send-photo"))
+				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-photo")))
 				if path == "" {
 					m.status = "usage: /send-photo <path>"
 					return m, nil
@@ -147,7 +148,7 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 				return m, m.sendCmd(m.recipientMailbox, displayBody, batch)
 			}
 			if strings.HasPrefix(body, "/send-voice") {
-				path := strings.TrimSpace(strings.TrimPrefix(body, "/send-voice"))
+				path := parseAttachmentPath(strings.TrimSpace(strings.TrimPrefix(body, "/send-voice")))
 				if path == "" {
 					m.status = "usage: /send-voice <path>"
 					return m, nil
@@ -219,6 +220,23 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd
+}
+
+func parseAttachmentPath(path string) string {
+	path = strings.TrimSpace(path)
+	if len(path) >= 2 {
+		switch {
+		case path[0] == '"' && path[len(path)-1] == '"':
+			if unquoted, err := strconv.Unquote(path); err == nil {
+				path = unquoted
+			} else {
+				path = path[1 : len(path)-1]
+			}
+		case path[0] == '\'' && path[len(path)-1] == '\'':
+			path = path[1 : len(path)-1]
+		}
+	}
+	return strings.ReplaceAll(path, `\ `, " ")
 }
 
 func (m *Model) View() string {
