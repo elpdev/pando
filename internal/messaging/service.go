@@ -83,7 +83,11 @@ func (s *Service) ImportContactInviteText(text string, verified bool) (*identity
 	if err != nil {
 		return nil, err
 	}
-	return s.ImportContactInviteBundle(*bundle, verified)
+	trustSource := identity.TrustSourceUnverified
+	if verified {
+		trustSource = identity.TrustSourceManualVerified
+	}
+	return s.ImportContactInviteBundle(*bundle, trustSource)
 }
 
 // PreviewContactInviteText parses an invite text into a Contact without
@@ -101,17 +105,22 @@ func (s *Service) PreviewContactInviteText(text string) (*identity.Contact, erro
 	return contact, nil
 }
 
-func (s *Service) ImportContactInviteBundle(bundle identity.InviteBundle, verified bool) (*identity.Contact, error) {
+func (s *Service) ImportContactInviteBundle(bundle identity.InviteBundle, trustSource string) (*identity.Contact, error) {
 	contact, err := identity.ContactFromInvite(bundle)
 	if err != nil {
 		return nil, err
 	}
 	if existing, loadErr := s.store.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
 		contact.Verified = existing.Verified
+		contact.TrustSource = existing.TrustSource
 	}
-	if verified {
+	if identity.TrustRank(trustSource) > identity.TrustRank(contact.TrustSource) {
+		contact.TrustSource = trustSource
+	}
+	if identity.TrustRank(contact.TrustSource) >= identity.TrustRank(identity.TrustSourceInviteCode) {
 		contact.Verified = true
 	}
+	contact.NormalizeTrust()
 	if err := s.store.SaveContact(contact); err != nil {
 		return nil, err
 	}
@@ -497,6 +506,8 @@ func (s *Service) applyContactUpdate(existing *identity.Contact, envelope protoc
 		return nil, fmt.Errorf("contact update does not match stored identity for sender %s", envelope.SenderMailbox)
 	}
 	updated.Verified = existing.Verified
+	updated.TrustSource = existing.TrustSource
+	updated.NormalizeTrust()
 	if err := s.store.SaveContact(updated); err != nil {
 		return nil, err
 	}

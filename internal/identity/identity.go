@@ -55,7 +55,15 @@ type Contact struct {
 	AccountSigningPublic ed25519.PublicKey `json:"account_signing_public"`
 	Devices              []ContactDevice   `json:"devices"`
 	Verified             bool              `json:"verified"`
+	TrustSource          string            `json:"trust_source,omitempty"`
 }
+
+const (
+	TrustSourceUnverified     = "unverified"
+	TrustSourceManualVerified = "manual-verified"
+	TrustSourceRelayDirectory = "relay-directory"
+	TrustSourceInviteCode     = "invite-code"
+)
 
 type ContactDevice struct {
 	ID               string            `json:"id"`
@@ -305,11 +313,62 @@ func ContactFromInvite(bundle InviteBundle) (*Contact, error) {
 	if err := VerifyInvite(bundle); err != nil {
 		return nil, err
 	}
-	contact := &Contact{AccountID: bundle.AccountID, AccountSigningPublic: append(ed25519.PublicKey(nil), bundle.AccountSigningPublic...), Devices: make([]ContactDevice, 0, len(bundle.Devices)), Verified: false}
+	contact := &Contact{AccountID: bundle.AccountID, AccountSigningPublic: append(ed25519.PublicKey(nil), bundle.AccountSigningPublic...), Devices: make([]ContactDevice, 0, len(bundle.Devices)), Verified: false, TrustSource: TrustSourceUnverified}
 	for _, device := range bundle.Devices {
 		contact.Devices = append(contact.Devices, ContactDevice{ID: device.ID, Mailbox: device.Mailbox, SigningPublic: append(ed25519.PublicKey(nil), device.SigningPublic...), EncryptionPublic: append([]byte(nil), device.EncryptionPublic...), Revoked: device.Revoked, RevokedAt: device.RevokedAt})
 	}
 	return contact, nil
+}
+
+func TrustRank(source string) int {
+	switch source {
+	case TrustSourceManualVerified:
+		return 3
+	case TrustSourceRelayDirectory, TrustSourceInviteCode:
+		return 2
+	case TrustSourceUnverified, "":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func StrongerTrust(current, next string) string {
+	if TrustRank(next) > TrustRank(current) {
+		return next
+	}
+	return current
+}
+
+func (c *Contact) NormalizeTrust() {
+	if c == nil {
+		return
+	}
+	if c.Verified {
+		if c.TrustSource == "" || c.TrustSource == TrustSourceUnverified {
+			c.TrustSource = TrustSourceManualVerified
+		}
+		return
+	}
+	if c.TrustSource == "" {
+		c.TrustSource = TrustSourceUnverified
+	}
+}
+
+func TrustLabel(source string, verified bool) string {
+	switch source {
+	case TrustSourceManualVerified:
+		return "verified"
+	case TrustSourceRelayDirectory:
+		return "relay"
+	case TrustSourceInviteCode:
+		return "invite"
+	default:
+		if verified {
+			return "verified"
+		}
+		return "unverified"
+	}
 }
 
 func VerifyInvite(bundle InviteBundle) error {

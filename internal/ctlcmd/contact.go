@@ -3,21 +3,30 @@ package ctlcmd
 import (
 	"fmt"
 	"os"
+	"time"
 
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func runContact(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pando contact <add|import|list|show|verify> [flags]")
+		return fmt.Errorf("usage: pando contact <add|import|invite|list|lookup|publish-directory|show|verify> [flags]")
 	}
 	switch args[0] {
 	case "add":
 		return runAddContact(args[1:])
 	case "import":
 		return runImportContact(args[1:])
+	case "publish-directory":
+		return runPublishDirectory(args[1:])
+	case "lookup":
+		return runLookupContact(args[1:])
+	case "invite":
+		return runContactInvite(args[1:])
 	case "list":
 		return runListContacts(args[1:])
 	case "show":
@@ -79,10 +88,13 @@ func runImportContactWithName(name string, args []string) error {
 	}
 	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
 		contact.Verified = existing.Verified
+		contact.TrustSource = existing.TrustSource
 	}
 	if name == "contact add" {
 		contact.Verified = true
+		contact.TrustSource = identity.StrongerTrust(contact.TrustSource, identity.TrustSourceManualVerified)
 	}
+	contact.NormalizeTrust()
 	if err := clientStore.SaveContact(contact); err != nil {
 		return err
 	}
@@ -118,6 +130,7 @@ func runListContacts(args []string) error {
 		Mailbox     string `json:"mailbox"`
 		Fingerprint string `json:"fingerprint"`
 		Verified    bool   `json:"verified"`
+		TrustSource string `json:"trust_source"`
 		Devices     int    `json:"devices"`
 	}, 0, len(contacts))
 	for _, contact := range contacts {
@@ -125,8 +138,9 @@ func runListContacts(args []string) error {
 			Mailbox     string `json:"mailbox"`
 			Fingerprint string `json:"fingerprint"`
 			Verified    bool   `json:"verified"`
+			TrustSource string `json:"trust_source"`
 			Devices     int    `json:"devices"`
-		}{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, Devices: len(contact.ActiveDevices())})
+		}{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, TrustSource: contact.TrustSource, Devices: len(contact.ActiveDevices())})
 	}
 	return writeJSON(os.Stdout, output)
 }
@@ -153,8 +167,9 @@ func runShowContact(args []string) error {
 		Mailbox     string                   `json:"mailbox"`
 		Fingerprint string                   `json:"fingerprint"`
 		Verified    bool                     `json:"verified"`
+		TrustSource string                   `json:"trust_source"`
 		Devices     []identity.ContactDevice `json:"devices"`
-	}{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, Devices: contact.Devices})
+	}{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, TrustSource: contact.TrustSource, Devices: contact.Devices})
 }
 
 func runVerifyContact(args []string) error {
@@ -185,4 +200,118 @@ func runVerifyContact(args []string) error {
 	}
 	fmt.Printf("verified contact %s (%s)\n", contact.AccountID, style.FormatFingerprint(contact.Fingerprint()))
 	return nil
+}
+
+func runPublishDirectory(args []string) error {
+	bfs := NewBaseFlagSet("contact publish-directory")
+	relayURL := bfs.FS.String("relay", "", "relay websocket URL")
+	relayToken := bfs.FS.String("relay-token", "", "relay auth token")
+	if err := bfs.Parse(args); err != nil {
+		return err
+	}
+	mailbox, resolvedDataDir, err := bfs.Resolve()
+	if err != nil {
+		return err
+	}
+	resolvedRelayURL, resolvedRelayToken, err := resolveRelayConfig(*bfs.RootDir, *relayURL, *relayToken)
+	if err != nil {
+		return err
+	}
+	clientStore := store.NewClientStore(resolvedDataDir)
+	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
+	if err != nil {
+		return err
+	}
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	if err != nil {
+		return err
+	}
+	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{
+		Mailbox:     id.AccountID,
+		Bundle:      id.InviteBundle(),
+		PublishedAt: time.Now().UTC(),
+		Version:     time.Now().UTC().UnixNano(),
+	}, id.AccountSigningPrivate)
+	if err != nil {
+		return err
+	}
+	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
+		return err
+	}
+	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
+	return nil
+}
+
+func runLookupContact(args []string) error {
+	bfs := NewBaseFlagSet("contact lookup")
+	contactMailbox := bfs.FS.String("contact", "", "contact mailbox identifier")
+	relayURL := bfs.FS.String("relay", "", "relay websocket URL")
+	relayToken := bfs.FS.String("relay-token", "", "relay auth token")
+	if err := bfs.Parse(args); err != nil {
+		return err
+	}
+	mailbox, resolvedDataDir, err := bfs.Resolve()
+	if err != nil {
+		return err
+	}
+	if *contactMailbox == "" {
+		return fmt.Errorf("-contact is required")
+	}
+	resolvedRelayURL, resolvedRelayToken, err := resolveRelayConfig(*bfs.RootDir, *relayURL, *relayToken)
+	if err != nil {
+		return err
+	}
+	clientStore := store.NewClientStore(resolvedDataDir)
+	_, _, err = clientStore.LoadOrCreateIdentity(mailbox)
+	if err != nil {
+		return err
+	}
+	client, err := relayapi.NewClient(resolvedRelayURL, resolvedRelayToken)
+	if err != nil {
+		return err
+	}
+	entry, err := client.LookupDirectoryEntry(*contactMailbox)
+	if err != nil {
+		return err
+	}
+	if err := relayapi.VerifySignedDirectoryEntry(*entry); err != nil {
+		return err
+	}
+	contact, err := identity.ContactFromInvite(entry.Entry.Bundle)
+	if err != nil {
+		return err
+	}
+	if existing, loadErr := clientStore.LoadContact(contact.AccountID); loadErr == nil && existing.Fingerprint() == contact.Fingerprint() {
+		contact.Verified = existing.Verified
+		contact.TrustSource = existing.TrustSource
+	}
+	contact.Verified = true
+	contact.TrustSource = identity.StrongerTrust(contact.TrustSource, identity.TrustSourceRelayDirectory)
+	contact.NormalizeTrust()
+	if err := clientStore.SaveContact(contact); err != nil {
+		return err
+	}
+	fmt.Printf("added relay directory contact %s with %d active devices\n", contact.AccountID, len(contact.ActiveDevices()))
+	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(contact.Fingerprint()))
+	return nil
+}
+
+func resolveRelayConfig(rootDir, relayURL, relayToken string) (string, string, error) {
+	devCfg, err := config.LoadDeviceConfig(rootDir)
+	if err != nil {
+		return "", "", err
+	}
+	resolvedRelayURL := relayURL
+	if resolvedRelayURL == "" {
+		resolvedRelayURL = devCfg.RelayURL
+	}
+	if resolvedRelayURL == "" {
+		resolvedRelayURL = config.DefaultClient().RelayURL
+	}
+	resolvedRelayToken := relayToken
+	if resolvedRelayToken == "" {
+		resolvedRelayToken = devCfg.RelayToken
+	}
+	return resolvedRelayURL, resolvedRelayToken, nil
 }

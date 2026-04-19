@@ -66,6 +66,7 @@ func (s *ClientStore) SaveContact(contact *identity.Contact) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
+	contact.NormalizeTrust()
 	contacts, err := s.loadContactsMap()
 	if err != nil {
 		return err
@@ -83,6 +84,7 @@ func (s *ClientStore) LoadContact(mailbox string) (*identity.Contact, error) {
 	if !ok {
 		return nil, ErrNotFound
 	}
+	contact.NormalizeTrust()
 	copyContact := contact
 	return &copyContact, nil
 }
@@ -94,6 +96,7 @@ func (s *ClientStore) ListContacts() ([]identity.Contact, error) {
 	}
 	list := make([]identity.Contact, 0, len(contacts))
 	for _, contact := range contacts {
+		contact.NormalizeTrust()
 		list = append(list, contact)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].AccountID < list[j].AccountID })
@@ -110,6 +113,11 @@ func (s *ClientStore) MarkContactVerified(mailbox string, verified bool) (*ident
 		return nil, ErrNotFound
 	}
 	contact.Verified = verified
+	if verified {
+		contact.TrustSource = identity.StrongerTrust(contact.TrustSource, identity.TrustSourceManualVerified)
+	} else {
+		contact.TrustSource = identity.TrustSourceUnverified
+	}
 	contacts[mailbox] = contact
 	if err := s.writeJSON(s.contactsPath(), contacts, 0o600); err != nil {
 		return nil, err
@@ -124,6 +132,7 @@ func (s *ClientStore) LoadContactByDeviceMailbox(mailbox string) (*identity.Cont
 		return nil, err
 	}
 	for _, contact := range contacts {
+		contact.NormalizeTrust()
 		if _, deviceErr := contact.DeviceByMailbox(mailbox); deviceErr == nil {
 			copyContact := contact
 			return &copyContact, nil
