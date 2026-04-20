@@ -167,7 +167,7 @@ func (m *Model) renderGroupHeader(item messageItem) string {
 	}
 	ts := ""
 	if !item.timestamp.IsZero() {
-		ts = item.timestamp.Format(time.Kitchen)
+		ts = item.timestamp.Local().Format(time.Kitchen)
 	}
 	suffix := style.Muted.Render(" " + style.GroupSep + " " + ts)
 	return nameStyled + suffix
