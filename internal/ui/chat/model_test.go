@@ -1385,6 +1385,44 @@ func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
 	}
 }
 
+func TestRenderMessagesUsesLocalTimezoneForHeaders(t *testing.T) {
+	oldLocal := time.Local
+	time.Local = time.FixedZone("UTC-7", -7*60*60)
+	defer func() {
+		time.Local = oldLocal
+	}()
+
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+
+	model.msgs.items = []messageItem{{
+		direction: "inbound",
+		sender:    "bob",
+		body:      "hello",
+		timestamp: time.Date(2026, 4, 19, 12, 34, 0, 0, time.UTC),
+	}}
+	model.renderMessages()
+
+	joined := strings.Join(model.msgs.rendered, "\n")
+	if !strings.Contains(joined, "5:34AM") {
+		t.Fatalf("expected local timezone timestamp in rendered output, got %q", joined)
+	}
+	if strings.Contains(joined, "12:34PM") {
+		t.Fatalf("expected rendered output to avoid raw UTC timestamp, got %q", joined)
+	}
+}
+
 func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 	model := newHelpTestModel(t)
 
