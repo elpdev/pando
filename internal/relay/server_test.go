@@ -1,6 +1,7 @@
 package relay
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/json"
@@ -261,6 +262,118 @@ func TestSubscribeRejectsMailboxWithoutPublishedDirectoryEntry(t *testing.T) {
 	}
 	if msg.Error.Message != ErrMailboxNotPublished.Error() {
 		t.Fatalf("expected unpublished mailbox error, got %q", msg.Error.Message)
+	}
+}
+
+func TestRelayLogsUnauthorizedRequest(t *testing.T) {
+	logger, logs := testBufferLogger()
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{AuthToken: "secret"}).Handler())
+	defer server.Close()
+
+	resp, err := http.Get(server.URL + "/directory/discoverable")
+	if err != nil {
+		t.Fatalf("get discoverable directory: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("expected unauthorized response, got %s", resp.Status)
+	}
+	if !strings.Contains(logs.String(), "msg=\"reject unauthorized request\"") {
+		t.Fatalf("expected unauthorized request log, got %q", logs.String())
+	}
+}
+
+func TestRelayLogsOperationalPublishAndSubscribeActivity(t *testing.T) {
+	logger, logs := testBufferLogger()
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{}).Handler())
+	defer server.Close()
+
+	bobIdentity := mustIdentity(t, "bob")
+	publishDirectoryEntry(t, server, bobIdentity)
+
+	publisher := dialTestConn(t, server)
+	defer publisher.Close()
+	_ = readChallenge(t, publisher)
+	writeMessage(t, publisher, protocol.Message{
+		Type: protocol.MessageTypePublish,
+		Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{
+			SenderMailbox:    "alice",
+			RecipientMailbox: "bob",
+			Body:             "queued hello",
+		}},
+	})
+	msg := readMessage(t, publisher)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected publish ack, got %+v", msg)
+	}
+
+	subscriber := dialTestConn(t, server)
+	defer subscriber.Close()
+	challenge := readChallenge(t, subscriber)
+	writeMessage(t, subscriber, protocol.Message{Type: protocol.MessageTypeSubscribe, Subscribe: subscribeRequest(t, bobIdentity, challenge)})
+	msg = readMessage(t, subscriber)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected subscribe ack, got %+v", msg)
+	}
+	msg = readMessage(t, subscriber)
+	if msg.Type != protocol.MessageTypeIncoming {
+		t.Fatalf("expected backlog delivery, got %+v", msg)
+	}
+
+	writeMessage(t, publisher, protocol.Message{
+		Type: protocol.MessageTypePublish,
+		Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{
+			SenderMailbox:    "mallory",
+			RecipientMailbox: "bob",
+			Body:             "live hello",
+		}},
+	})
+	msg = readMessage(t, publisher)
+	if msg.Type != protocol.MessageTypeAck {
+		t.Fatalf("expected live publish ack, got %+v", msg)
+	}
+	msg = readMessage(t, subscriber)
+	if msg.Type != protocol.MessageTypeIncoming {
+		t.Fatalf("expected live delivery, got %+v", msg)
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{
+		"msg=\"queued envelope\"",
+		"msg=\"draining mailbox backlog\"",
+		"message_count=1",
+		"msg=\"subscriber registered\"",
+		"backlog_count=1",
+		"msg=\"delivered envelope\"",
+		"subscriber_count=1",
+	} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("expected log output to contain %q, got %q", want, logOutput)
+		}
+	}
+}
+
+func TestRelayLogsPublishRateLimitExceeded(t *testing.T) {
+	logger, logs := testBufferLogger()
+	server := httptest.NewServer(NewServer(logger, NewMemoryQueueStore(), Options{RateLimitPerMinute: 1}).Handler())
+	defer server.Close()
+
+	conn := dialTestConn(t, server)
+	defer conn.Close()
+	_ = readChallenge(t, conn)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypePublish, Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{SenderMailbox: "alice", RecipientMailbox: "bob", Body: "first"}}})
+	_ = readMessage(t, conn)
+	writeMessage(t, conn, protocol.Message{Type: protocol.MessageTypePublish, Publish: &protocol.PublishRequest{Envelope: protocol.Envelope{SenderMailbox: "alice", RecipientMailbox: "bob", Body: "second"}}})
+	msg := readMessage(t, conn)
+	if msg.Type != protocol.MessageTypeError || msg.Error == nil || msg.Error.Message != "relay rate limit exceeded" {
+		t.Fatalf("expected rate limit error, got %+v", msg)
+	}
+
+	logOutput := logs.String()
+	for _, want := range []string{"msg=\"rate limit exceeded\"", "scope=publish", "sender_mailbox=alice", "recipient_mailbox=bob", "limit=1"} {
+		if !strings.Contains(logOutput, want) {
+			t.Fatalf("expected log output to contain %q, got %q", want, logOutput)
+		}
 	}
 }
 
@@ -591,4 +704,9 @@ type testWriter struct {
 func (w testWriter) Write(p []byte) (n int, err error) {
 	w.t.Log(strings.TrimSpace(string(p)))
 	return len(p), nil
+}
+
+func testBufferLogger() (*slog.Logger, *bytes.Buffer) {
+	var logs bytes.Buffer
+	return slog.New(slog.NewTextHandler(&logs, nil)), &logs
 }

@@ -41,6 +41,6 @@ func (s *Server) verifyMailboxOwnership(mailbox string, signingPublic []byte) er
 	return fmt.Errorf("%w", ErrMailboxNotAuthorized)
 }
 
-func (s *Server) allowRateLimit(key string, now time.Time) bool {
+func (s *Server) allowRateLimit(key string, now time.Time) rateLimitDecision {
 	return s.limiter.Allow(key, now)
 }

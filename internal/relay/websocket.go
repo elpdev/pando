@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sync"
@@ -30,17 +31,21 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	}
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
-		s.logger.Error("upgrade websocket", "error", err)
+		s.logger.Error("upgrade websocket", "remote_addr", r.RemoteAddr, "error", err)
 		return
 	}
 
 	session := &wsSession{server: s, conn: conn, remoteAddr: r.RemoteAddr}
+	s.logger.Info("websocket connected", "remote_addr", r.RemoteAddr)
 	session.run()
 }
 
 func (sess *wsSession) run() {
 	defer sess.conn.Close()
-	defer sess.close()
+	var readErr error
+	defer func() {
+		sess.close(readErr)
+	}()
 
 	sess.challenge = newSubscribeChallenge(time.Now().UTC())
 	sess.send(protocol.Message{Type: protocol.MessageTypeSubscribeChallenge, Challenge: sess.challenge})
@@ -48,6 +53,7 @@ func (sess *wsSession) run() {
 	for {
 		var msg protocol.Message
 		if err := sess.conn.ReadJSON(&msg); err != nil {
+			readErr = err
 			return
 		}
 		if err := msg.Validate(); err != nil {
@@ -59,11 +65,15 @@ func (sess *wsSession) run() {
 	}
 }
 
-func (sess *wsSession) close() {
+func (sess *wsSession) close(err error) {
 	if sess.mailbox != "" {
 		sess.server.unregister(sess)
 	}
-	sess.server.logger.Info("client disconnected")
+	if err == nil || errors.Is(err, io.EOF) || errors.Is(err, websocket.ErrCloseSent) || websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+		sess.server.logger.Info("client disconnected", "remote_addr", sess.remoteAddr, "mailbox", sess.mailbox)
+		return
+	}
+	sess.server.logger.Warn("client disconnected", "remote_addr", sess.remoteAddr, "mailbox", sess.mailbox, "error", err)
 }
 
 func (sess *wsSession) send(msg protocol.Message) {
@@ -74,7 +84,7 @@ func (sess *wsSession) send(msg protocol.Message) {
 	}
 	_ = sess.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 	if err := sess.conn.WriteJSON(msg); err != nil {
-		sess.server.logger.Info("write websocket message")
+		sess.server.logger.Warn("write websocket message", "remote_addr", sess.remoteAddr, "mailbox", sess.mailbox, "message_type", msg.Type, "error", err)
 	}
 }
 
@@ -95,7 +105,9 @@ func (sess *wsSession) handleMessage(msg protocol.Message) error {
 
 func (sess *wsSession) handleSubscribe(req protocol.SubscribeRequest) error {
 	now := time.Now().UTC()
-	if !sess.server.allowRateLimit("subscribe:"+sess.remoteAddr, now) {
+	decision := sess.server.allowRateLimit("subscribe:"+sess.remoteAddr, now)
+	if !decision.Allowed {
+		sess.server.logger.Warn("rate limit exceeded", "scope", "subscribe", "remote_addr", sess.remoteAddr, "mailbox", req.Mailbox, "limit", decision.Limit, "count", decision.Count, "window_started_at", decision.WindowStartedAt)
 		sess.sendError("relay rate limit exceeded")
 		return fmt.Errorf("subscribe rate limited")
 	}
@@ -120,6 +132,7 @@ func (sess *wsSession) handleSubscribe(req protocol.SubscribeRequest) error {
 		return err
 	}
 	sess.send(protocol.Message{Type: protocol.MessageTypeAck, Ack: &protocol.Ack{ID: sess.mailbox}})
+	sess.server.logger.Info("subscriber registered", "remote_addr", sess.remoteAddr, "mailbox", sess.mailbox, "backlog_count", len(backlog))
 	for _, envelope := range backlog {
 		envelope := envelope
 		sess.send(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelope})
@@ -129,24 +142,34 @@ func (sess *wsSession) handleSubscribe(req protocol.SubscribeRequest) error {
 
 func (sess *wsSession) handlePublish(envelope protocol.Envelope) error {
 	now := time.Now().UTC()
+	payloadBytes := envelopeSize(envelope)
 	if err := validateEnvelopeLimits(envelope, sess.server.options); err != nil {
-		sess.server.logger.Warn("reject oversized envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+		sess.server.logger.Warn("reject oversized envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "payload_bytes", payloadBytes, "error", err)
 		sess.sendError(genericClientError)
 		return err
 	}
-	if !sess.server.allowRateLimit(envelope.SenderMailbox, now) {
+	decision := sess.server.allowRateLimit(envelope.SenderMailbox, now)
+	if !decision.Allowed {
+		sess.server.logger.Warn("rate limit exceeded", "scope", "publish", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "limit", decision.Limit, "count", decision.Count, "window_started_at", decision.WindowStartedAt)
 		sess.sendError("relay rate limit exceeded")
 		return fmt.Errorf("publish rate limited")
 	}
 	envelope = sess.server.finalizePublishedEnvelope(envelope, now)
-	if err := sess.server.publish(envelope); err != nil {
+	result, err := sess.server.publish(envelope)
+	if err != nil {
 		if errors.Is(err, ErrQueueFull) {
+			sess.server.logger.Warn("queue full while publishing", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "payload_bytes", payloadBytes, "error", err)
 			sess.sendError("mailbox queue is full")
 			return err
 		}
-		sess.server.logger.Warn("publish envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "error", err)
+		sess.server.logger.Warn("publish envelope", "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "payload_bytes", payloadBytes, "error", err)
 		sess.sendError(genericClientError)
 		return err
+	}
+	if result.Queued {
+		sess.server.logger.Info("queued envelope", "envelope_id", envelope.ID, "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "payload_bytes", payloadBytes)
+	} else {
+		sess.server.logger.Info("delivered envelope", "envelope_id", envelope.ID, "sender_mailbox", envelope.SenderMailbox, "recipient_mailbox", envelope.RecipientMailbox, "payload_bytes", payloadBytes, "subscriber_count", result.SubscriberCount)
 	}
 	sess.send(protocol.Message{Type: protocol.MessageTypeAck, Ack: &protocol.Ack{ID: envelope.ID}})
 	return nil

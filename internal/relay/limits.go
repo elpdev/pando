@@ -30,6 +30,13 @@ type rateLimiter struct {
 	limit   int
 }
 
+type rateLimitDecision struct {
+	Allowed         bool
+	Count           int
+	Limit           int
+	WindowStartedAt time.Time
+}
+
 type rateWindow struct {
 	startedAt time.Time
 	count     int
@@ -39,7 +46,7 @@ func newRateLimiter(limit int) *rateLimiter {
 	return &rateLimiter{windows: make(map[string]rateWindow), limit: limit}
 }
 
-func (l *rateLimiter) Allow(mailbox string, now time.Time) bool {
+func (l *rateLimiter) Allow(mailbox string, now time.Time) rateLimitDecision {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
@@ -49,11 +56,11 @@ func (l *rateLimiter) Allow(mailbox string, now time.Time) bool {
 	}
 	if window.count >= l.limit {
 		l.windows[mailbox] = window
-		return false
+		return rateLimitDecision{Allowed: false, Count: window.count, Limit: l.limit, WindowStartedAt: window.startedAt}
 	}
 	window.count++
 	l.windows[mailbox] = window
-	return true
+	return rateLimitDecision{Allowed: true, Count: window.count, Limit: l.limit, WindowStartedAt: window.startedAt}
 }
 
 func validateEnvelopeLimits(envelope protocol.Envelope, options Options) error {

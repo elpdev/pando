@@ -125,7 +125,9 @@ func (s *Server) handleRendezvous(w http.ResponseWriter, r *http.Request) {
 		}
 		s.writeJSON(w, http.StatusOK, relayapi.GetRendezvousResponse{Payloads: payloads})
 	case http.MethodPut:
-		if !s.allowRateLimit("rendezvous:"+r.RemoteAddr, time.Now().UTC()) {
+		decision := s.allowRateLimit("rendezvous:"+r.RemoteAddr, time.Now().UTC())
+		if !decision.Allowed {
+			s.logger.Warn("rate limit exceeded", "scope", "rendezvous", "remote_addr", r.RemoteAddr, "limit", decision.Limit, "count", decision.Count, "window_started_at", decision.WindowStartedAt)
 			s.writeJSONError(w, http.StatusTooManyRequests, "relay rate limit exceeded")
 			return
 		}
@@ -186,6 +188,7 @@ func (s *Server) authorizeRequest(w http.ResponseWriter, r *http.Request) bool {
 	if s.options.AuthToken == "" || r.Header.Get(authHeader) == s.options.AuthToken {
 		return true
 	}
+	s.logger.Warn("reject unauthorized request", "path", r.URL.Path, "remote_addr", r.RemoteAddr)
 	http.Error(w, "relay auth token is required", http.StatusUnauthorized)
 	return false
 }

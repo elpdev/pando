@@ -37,6 +37,11 @@ type mailbox struct {
 	subs map[*wsSession]struct{}
 }
 
+type publishResult struct {
+	Queued          bool
+	SubscriberCount int
+}
+
 const genericClientError = "request rejected"
 const subscribeChallengeTTL = 30 * time.Second
 const maxRendezvousPayloads = 2
@@ -115,6 +120,9 @@ func (s *Server) register(sub *wsSession) ([]protocol.Envelope, error) {
 	if err != nil {
 		return nil, fmt.Errorf("drain mailbox queue: %w", err)
 	}
+	if len(backlog) > 0 {
+		s.logger.Info("draining mailbox backlog", "mailbox", sub.mailbox, "message_count", len(backlog))
+	}
 	return backlog, nil
 }
 
@@ -132,7 +140,7 @@ func (s *Server) unregister(sub *wsSession) {
 	}
 }
 
-func (s *Server) publish(envelope protocol.Envelope) error {
+func (s *Server) publish(envelope protocol.Envelope) (publishResult, error) {
 	s.mu.Lock()
 	mb := s.getMailboxLocked(envelope.RecipientMailbox)
 	subs := make([]*wsSession, 0, len(mb.subs))
@@ -142,9 +150,9 @@ func (s *Server) publish(envelope protocol.Envelope) error {
 	if len(subs) == 0 {
 		s.mu.Unlock()
 		if err := s.queue.Enqueue(envelope); err != nil {
-			return fmt.Errorf("queue offline envelope: %w", err)
+			return publishResult{}, fmt.Errorf("queue offline envelope: %w", err)
 		}
-		return nil
+		return publishResult{Queued: true}, nil
 	}
 	s.mu.Unlock()
 
@@ -152,7 +160,7 @@ func (s *Server) publish(envelope protocol.Envelope) error {
 	for _, sub := range subs {
 		sub.send(message)
 	}
-	return nil
+	return publishResult{SubscriberCount: len(subs)}, nil
 }
 
 func (s *Server) getMailboxLocked(name string) *mailbox {

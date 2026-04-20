@@ -17,16 +17,16 @@ func TestValidateEnvelopeLimitsRejectsOversizedPayload(t *testing.T) {
 func TestRateLimiterBlocksBurstWithinWindow(t *testing.T) {
 	limiter := newRateLimiter(2)
 	now := time.Now().UTC()
-	if !limiter.Allow("alice", now) {
+	if decision := limiter.Allow("alice", now); !decision.Allowed {
 		t.Fatalf("first message should be allowed")
 	}
-	if !limiter.Allow("alice", now.Add(10*time.Second)) {
+	if decision := limiter.Allow("alice", now.Add(10*time.Second)); !decision.Allowed {
 		t.Fatalf("second message should be allowed")
 	}
-	if limiter.Allow("alice", now.Add(20*time.Second)) {
+	if decision := limiter.Allow("alice", now.Add(20*time.Second)); decision.Allowed {
 		t.Fatalf("third message in same minute should be rejected")
 	}
-	if !limiter.Allow("alice", now.Add(61*time.Second)) {
+	if decision := limiter.Allow("alice", now.Add(61*time.Second)); !decision.Allowed {
 		t.Fatalf("message after window reset should be allowed")
 	}
 }
