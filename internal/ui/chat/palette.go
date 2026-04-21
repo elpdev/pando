@@ -70,13 +70,14 @@ func renderPaletteListItemMatched(width int, selected bool, title, detail, meta 
 	if titleWidth < 1 {
 		titleWidth = 1
 	}
-	header := marker + lipgloss.NewStyle().Width(titleWidth).MaxWidth(titleWidth).Render(titleText)
+	pad := lipgloss.NewStyle().Background(style.BackdropTint)
+	header := marker + pad.Width(titleWidth).MaxWidth(titleWidth).Render(titleText)
 	if meta != "" {
-		header += " " + lipgloss.NewStyle().Width(metaWidth).Align(lipgloss.Right).Render(metaStyle.Render(meta))
+		header += " " + pad.Width(metaWidth).Align(lipgloss.Right).Render(metaStyle.Render(meta))
 	}
 	lines := []string{header}
 	if detail != "" {
-		lines = append(lines, "  "+detailStyle.Width(innerWidth).MaxWidth(innerWidth).Render(detail))
+		lines = append(lines, "  "+detailStyle.Background(style.BackdropTint).Width(innerWidth).MaxWidth(innerWidth).Render(detail))
 	}
 	return rowStyle.Render(strings.Join(lines, "\n"))
 }
