@@ -32,6 +32,9 @@ var (
 	colorWarn = lipgloss.Color("214") // amber / reconnecting / unverified
 	colorBad  = lipgloss.Color("203") // red / failed / auth-failed
 	colorInfo = lipgloss.Color("69")  // blue / input accent, unread badge
+
+	colorPhosphor = lipgloss.Color("#9FE8B0") // CRT phosphor green / banner letters
+	colorAmber    = lipgloss.Color("#FFB347") // warm amber / banner slashes
 )
 
 // ----------------------------------------------------------------------------
@@ -170,10 +173,13 @@ var peerAccentPalette = []lipgloss.Color{
 	lipgloss.Color("177"), // orchid
 }
 
-// BannerLetters is the color strip applied left-to-right across the PANDO
-// wordmark in the app header. Reuses the first five peer-accent hues so the
-// banner shares visual vocabulary with the sidebar and peer headings.
-var BannerLetters = peerAccentPalette[:5]
+// BannerText renders the PANDO wordmark rows in the welcome-screen banner.
+// CRT phosphor green, bold.
+var BannerText = lipgloss.NewStyle().Foreground(colorPhosphor).Bold(true)
+
+// BannerSlash renders the diagonal-slash decoration bracketing the wordmark.
+// Warm amber, reads as a signature-terminal accent beside the phosphor letters.
+var BannerSlash = lipgloss.NewStyle().Foreground(colorAmber)
 
 // PeerAccent returns a stable color for the given fingerprint. An empty
 // fingerprint falls back to the ok (green) token.
