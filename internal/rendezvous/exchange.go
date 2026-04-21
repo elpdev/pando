@@ -66,6 +66,9 @@ func Exchange(ctx context.Context, cfg PollConfig) (*identity.InviteBundle, erro
 	}
 	for {
 		if err := ctx.Err(); err != nil {
+			if errors.Is(err, context.DeadlineExceeded) {
+				return nil, ErrTimedOut
+			}
 			return nil, err
 		}
 		payloads, err := cfg.Client.GetRendezvousPayloads(id)
