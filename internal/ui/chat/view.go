@@ -28,13 +28,13 @@ func (m *Model) View() string {
 		view = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 	if m.helpOpen {
-		return m.renderHelpModal(view)
+		return m.clearInlineMedia(m.renderHelpModal(view))
 	}
 	if m.addContact.open {
-		return m.addContact.Overlay(view, m.ui.width, m.ui.height)
+		return m.clearInlineMedia(m.addContact.Overlay(view, m.ui.width, m.ui.height))
 	}
 	if m.peerDetailOpen {
-		return m.renderPeerDetailModal(view)
+		return m.clearInlineMedia(m.renderPeerDetailModal(view))
 	}
 	return view
 }
@@ -106,7 +106,7 @@ func (m *Model) renderSidebar() string {
 func (m *Model) renderConversation() string {
 	width := m.conversationWidth()
 	if m.filePicker.open {
-		return m.filePicker.View()
+		return m.clearInlineMedia(m.filePicker.View())
 	}
 	if m.peer.mailbox == "" {
 		hasDirectContacts := false
@@ -169,6 +169,10 @@ func (m *Model) renderConversation() string {
 
 func (m *Model) renderViewport() string {
 	view := m.viewport.View()
+	return m.clearInlineMedia(view)
+}
+
+func (m *Model) clearInlineMedia(view string) string {
 	if prefix := media.ViewportPrefix(); prefix != "" {
 		return prefix + view
 	}
