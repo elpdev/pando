@@ -1500,16 +1500,16 @@ func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 func TestTabTogglesFocus(t *testing.T) {
 	model := newHelpTestModel(t)
 
+	if model.ui.focus != focusSidebar {
+		t.Fatalf("expected initial focus on sidebar when no chat is open, got %v", model.ui.focus)
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if model.ui.focus != focusChat {
-		t.Fatalf("expected initial focus on chat, got %v", model.ui.focus)
+		t.Fatalf("expected tab to move focus to chat, got %v", model.ui.focus)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
 	if model.ui.focus != focusSidebar {
-		t.Fatalf("expected tab to move focus to sidebar, got %v", model.ui.focus)
-	}
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if model.ui.focus != focusChat {
-		t.Fatalf("expected tab to move focus back to chat, got %v", model.ui.focus)
+		t.Fatalf("expected tab to move focus back to sidebar, got %v", model.ui.focus)
 	}
 }
 

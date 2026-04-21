@@ -105,6 +105,9 @@ func New(deps Deps) *Model {
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
 	m.syncComposer()
+	if m.peer.mailbox == "" {
+		m.ui.focus = focusSidebar
+	}
 	m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
 	return m
 }
