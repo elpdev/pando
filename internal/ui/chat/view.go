@@ -174,7 +174,6 @@ func (m *Model) renderConversation() string {
 		m.renderViewport(),
 		m.renderJumpPill(width),
 		m.renderToast(),
-		m.renderTypingIndicator(),
 		m.renderPendingAttachment(width),
 		m.renderComposer(width),
 	}

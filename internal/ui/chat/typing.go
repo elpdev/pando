@@ -96,3 +96,7 @@ func (m *Model) renderTypingIndicator() string {
 	}
 	return style.Italic.Render(fmt.Sprintf("%s is typing %s", m.peer.mailbox, m.typing.spinner.View()))
 }
+
+func (m *Model) typingFooterSegment() string {
+	return m.renderTypingIndicator()
+}

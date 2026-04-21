@@ -65,9 +65,6 @@ func (m *Model) updateLayout() {
 	if m.ui.toast != nil {
 		extraRows++
 	}
-	if m.typing.peerVisible {
-		extraRows++
-	}
 	if m.pending != nil {
 		extraRows++
 	}

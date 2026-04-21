@@ -327,6 +327,9 @@ func (m *Model) FooterSegments() []string {
 	if peer := m.peerFooterSegment(); peer != "" {
 		segments = append(segments, peer)
 	}
+	if typing := m.typingFooterSegment(); typing != "" {
+		segments = append(segments, typing)
+	}
 	segments = append(segments, m.keyHintSegment())
 	return segments
 }
