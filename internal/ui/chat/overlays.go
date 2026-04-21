@@ -9,6 +9,11 @@ import (
 )
 
 func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
+	if m.contactRequests.open {
+		if handled, cmd := m.contactRequests.Update(msg); handled {
+			return true, cmd
+		}
+	}
 	if m.addContact.open {
 		if handled, cmd := m.addContact.Update(msg); handled {
 			return true, cmd
@@ -88,7 +93,7 @@ func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) openCommandPalette() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "")
+	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount)
 	m.input.Blur()
 	return m.commandPalette.Open()
 }
@@ -97,6 +102,9 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 	switch action.command {
 	case commandPaletteCommandAddContact:
 		m.openAddContactModal()
+		return nil
+	case commandPaletteCommandContactRequests:
+		m.openContactRequestsModal()
 		return nil
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()

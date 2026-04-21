@@ -36,12 +36,14 @@ type Model struct {
 	drafts        draftState
 	pending       *pendingAttachment
 
-	filePicker     filePickerModel
-	commandPalette commandPaletteModel
-	addContact     addContactModal
-	helpOpen       bool
-	peerDetailOpen bool
-	unread         map[string]int
+	filePicker           filePickerModel
+	commandPalette       commandPaletteModel
+	addContact           addContactModal
+	contactRequests      contactRequestsModal
+	pendingRequestsCount int
+	helpOpen             bool
+	peerDetailOpen       bool
+	unread               map[string]int
 }
 
 func New(deps Deps) *Model {
@@ -105,7 +107,11 @@ func New(deps Deps) *Model {
 		ensureRelayClient: m.ensureRelayClient,
 		relayConfigured:   m.relayConfigured,
 	})
+	m.contactRequests = newContactRequestsModal(contactRequestsDeps{
+		decide: m.makeContactRequestDecision,
+	})
 	m.loadContacts(deps.RecipientMailbox)
+	m.loadContactRequests()
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
 	m.syncComposer()
@@ -166,6 +172,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:
 		return m.handleAddContactClosedMsg(msg)
+	case contactRequestsClosedMsg:
+		return m.handleContactRequestsClosedMsg(msg)
+	case contactRequestDecisionResultMsg:
+		return m.handleContactRequestDecisionResult(msg)
 	case filePickerClosedMsg:
 		m.closeFilePicker()
 		return m, nil
