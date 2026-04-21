@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -80,13 +79,13 @@ func renderPaletteHeader(title, subtitle string, width int) string {
 	if width < 1 {
 		width = 1
 	}
-	accent := style.PaletteAccent.Render("●")
-	header := fmt.Sprintf("%s %s", accent, style.PaletteTitle.Render(title))
-	parts := []string{header}
+	rendered := style.PaletteTitle.Render(title)
+	slashCount := max(3, width-lipgloss.Width(rendered)-1)
+	slashes := style.PaletteAccent.Render(strings.Repeat("/", slashCount))
+	parts := []string{rendered + " " + slashes}
 	if subtitle != "" {
 		parts = append(parts, style.PaletteMeta.Width(width).Render(subtitle))
 	}
-	parts = append(parts, style.Faint.Render(strings.Repeat("─", max(8, min(width, lipgloss.Width(title)+6)))))
 	return strings.Join(parts, "\n")
 }
 
