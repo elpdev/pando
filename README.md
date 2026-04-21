@@ -72,6 +72,8 @@ pando identity init --mailbox alice --publish-directory
 pando contact publish-directory --mailbox alice --discoverable
 ```
 
+On first use, Pando now asks for a passphrase for each mailbox and encrypts the local identity, contacts, and pending-enrollment files under `~/.pando/clients/<mailbox>/`. Later TUI and CLI sessions prompt for that passphrase before loading chat history.
+
 If your relay does not require auth, skip `pando config set relay-token`.
 
 Do the same on the other device with its own mailbox name:
@@ -124,6 +126,33 @@ More specific overrides still win when needed:
 
 - `pando`: `-data-dir`
 - `pando-relay`: `-store`
+
+### Client passphrases
+
+Per-mailbox client state under `~/.pando/clients/<mailbox>/` is protected with a passphrase:
+
+- `identity.json`
+- `contacts.json`
+- `pending-enrollment.json`
+
+That passphrase also gates local chat history decryption because history keys are derived from the unlocked identity.
+
+Useful commands and environment variables:
+
+```bash
+# unlock non-interactively
+export PANDO_PASSPHRASE='correct horse battery staple'
+
+# change an existing mailbox passphrase
+pando identity change-passphrase --mailbox alice
+
+# change non-interactively
+export PANDO_PASSPHRASE='current passphrase'
+export PANDO_PASSPHRASE_NEW='new passphrase'
+pando identity change-passphrase --mailbox alice
+```
+
+If stdin is not a terminal and `PANDO_PASSPHRASE` is unset, client commands fail fast instead of hanging on a hidden prompt.
 
 ### Relay configuration
 
@@ -190,6 +219,7 @@ The `pando` binary handles both the TUI client and management subcommands. The c
 |---|---|
 | `pando` | Start the TUI chat client |
 | `pando identity init` | Create a new identity for a mailbox (`--publish-directory` also publishes relay bootstrap state) |
+| `pando identity change-passphrase` | Re-encrypt a mailbox's protected local state with a new passphrase |
 | `pando contact publish-directory` | Publish the signed relay directory entry for a mailbox (`--discoverable` also lists it in relay discovery) |
 | `pando contact discover` | List discoverable mailboxes published to the relay directory |
 | `pando contact lookup` | Import a contact directly from the relay directory by mailbox |

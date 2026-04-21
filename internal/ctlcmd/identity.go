@@ -7,14 +7,14 @@ import (
 	"github.com/atotto/clipboard"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
-	"github.com/elpdev/pando/internal/store"
+	"github.com/elpdev/pando/internal/passphrase"
 	"github.com/elpdev/pando/internal/ui/style"
 	qrterminal "github.com/mdp/qrterminal/v3"
 )
 
 func runIdentity(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pando identity <init|show|invite-code|export-invite> [flags]")
+		return fmt.Errorf("usage: pando identity <init|show|invite-code|export-invite|change-passphrase> [flags]")
 	}
 	switch args[0] {
 	case "init":
@@ -25,11 +25,33 @@ func runIdentity(args []string) error {
 		return runInviteCode(args[1:])
 	case "export-invite":
 		return runExportInvite(args[1:])
+	case "change-passphrase":
+		return runChangePassphrase(args[1:])
 	case "help":
 		return runHelp([]string{"identity"})
 	default:
 		return fmt.Errorf("unknown identity subcommand %q", args[0])
 	}
+}
+
+func runChangePassphrase(args []string) error {
+	bfs := NewBaseFlagSet("identity change-passphrase")
+	if err := bfs.Parse(args); err != nil {
+		return err
+	}
+	mailbox, dataDir, err := bfs.Resolve()
+	if err != nil {
+		return err
+	}
+	clientStore, err := prepareClientStore(mailbox, dataDir)
+	if err != nil {
+		return err
+	}
+	if err := passphrase.ChangeClientStorePassphrase(clientStore, mailbox); err != nil {
+		return err
+	}
+	fmt.Printf("updated passphrase for %s\n", mailbox)
+	return nil
 }
 
 func runInit(args []string) error {
@@ -44,7 +66,10 @@ func runInit(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(dataDir)
+	clientStore, err := prepareClientStore(mailbox, dataDir)
+	if err != nil {
+		return err
+	}
 	id, created, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -77,7 +102,10 @@ func runShowIdentity(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(dataDir)
+	clientStore, err := prepareClientStore(mailbox, dataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -101,7 +129,10 @@ func runExportInvite(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -125,7 +156,10 @@ func runInviteCode(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err

@@ -10,7 +10,6 @@ import (
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/rendezvous"
-	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -74,7 +73,10 @@ func runInviteExchange(rootDir, dataDir, mailbox, relayURL, relayToken, code str
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(resolvedMailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, resolvedMailbox)
 	if err != nil {
 		return err
