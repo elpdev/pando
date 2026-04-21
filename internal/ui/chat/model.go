@@ -559,7 +559,7 @@ func (m *Model) syncComposer() {
 	if width <= 0 {
 		return
 	}
-	innerWidth := max(8, width-2)
+	innerWidth := max(8, width-4)
 	m.input.SetWidth(innerWidth)
 	rows := composerRowsForValue(m.input.Value(), innerWidth-lipgloss.Width(m.input.Prompt))
 	m.ui.composerRows = rows

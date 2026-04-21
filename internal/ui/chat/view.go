@@ -132,13 +132,11 @@ func (m *Model) renderConversation() string {
 				step("3.", "start typing", "pick them in the sidebar, then hit enter"),
 			}, "\n")
 			card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
-			return lipgloss.NewStyle().Width(width).Render(card + "\n\n" + m.renderComposer(width))
+			return lipgloss.NewStyle().Width(width).Render(card)
 		}
 		lines := []string{
 			style.Bold.Render("No chat selected"),
 			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+n to import another."),
-			"",
-			m.renderComposer(width),
 		}
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}
@@ -181,7 +179,7 @@ func (m *Model) renderPendingAttachment(width int) string {
 	}
 	label := fmt.Sprintf("%s %s", strings.ToUpper(kind), m.PendingAttachmentLabel())
 	clear := style.Muted.Render("esc clear")
-	pad := width - lipgloss.Width(label) - lipgloss.Width(clear) - 2
+	pad := width - lipgloss.Width(label) - lipgloss.Width(clear) - 4
 	if pad < 1 {
 		pad = 1
 	}
