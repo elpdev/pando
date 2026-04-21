@@ -88,7 +88,11 @@ func (m *Model) renderSidebar() string {
 			if contact.TrustSource == identity.TrustSourceUnverified {
 				statusStyle = style.UnverifiedWarn
 			}
-			lines = append(lines, fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, statusStyle.Render(statusText)))
+			row := fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, statusStyle.Render(statusText))
+			if isActive {
+				row = style.ActiveRow.Width(max(1, m.ui.sidebarWidth-1)).Render(row)
+			}
+			lines = append(lines, row)
 		}
 	}
 	content := strings.Join(lines, "\n")
@@ -110,7 +114,7 @@ func (m *Model) renderConversation() string {
 		}
 		if !hasDirectContacts {
 			cardWidth := min(max(40, width-4), max(30, width-2))
-			title := style.Bright.Bold(true).Render("Welcome to Pando")
+			title := style.ModalTitle.Render("Welcome to Pando")
 			rule := style.Muted.Render(strings.Repeat("─", max(1, lipgloss.Width(title))))
 			step := func(n, label, hint string) string {
 				head := style.StatusInfo.Bold(true).Render(n) + "  " + style.Bold.Render(label)
@@ -139,15 +143,20 @@ func (m *Model) renderConversation() string {
 		return m.filePicker.View()
 	}
 	peerHeading := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
+	accentColor := style.PeerAccent(m.peer.fingerprint)
 	if m.peer.isRoom {
 		peerHeading = style.StatusInfo.Bold(true).Render(m.peer.label)
+		accentColor = style.RoomAccent
 	}
 	hint := style.Muted.Render("ctrl+o attach  |  ctrl+p peer detail  |  ? help")
 	if m.peer.isRoom {
 		hint = style.Muted.Render(fmt.Sprintf("encrypted room  |  %d/%d members  |  ? help", m.peer.memberCount, messaging.DefaultRoomCap))
 	}
+	ruleWidth := min(max(8, lipgloss.Width(peerHeading)+6), max(1, width))
+	accentRule := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", ruleWidth))
 	header := []string{
 		peerHeading,
+		accentRule,
 		hint,
 		m.viewport.View(),
 		m.renderJumpPill(width),

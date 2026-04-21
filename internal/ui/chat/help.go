@@ -16,14 +16,14 @@ var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts"}, {"⏎
 
 var helpSectionMessaging = []helpShortcut{{"ctrl+n", "add contact"}, {"ctrl+o", "attach file"}, {"ctrl+p", "peer detail"}, {"/send-photo <path>", "attach photo via path"}, {"/send-voice <path>", "attach voice via path"}, {"/send-file <path>", "attach file via path"}, {"ctrl+u", "clear input"}, {"?", "toggle this help"}, {"esc", "close overlay"}}
 
-func (m *Model) renderHelpModal(base string) string {
+func (m *Model) renderHelpModal(_ string) string {
 	modalWidth := min(max(64, m.ui.width*2/3), max(40, m.ui.width-6))
 	modalHeight := min(max(18, m.ui.height*2/3), max(14, m.ui.height-4))
 	if modalWidth <= 0 || modalHeight <= 0 {
-		return base
+		return ""
 	}
 	colWidth := max(20, (modalWidth-6)/2)
-	title := style.Bright.Bold(true).Render("Help")
+	title := style.ModalTitle.Render("Help")
 	navTitle := style.Bold.Render("Navigation")
 	msgTitle := style.Bold.Render("Messaging")
 	nav := renderHelpColumn(helpSectionNavigation, colWidth)
@@ -32,8 +32,8 @@ func (m *Model) renderHelpModal(base string) string {
 	footer := style.Subtle.Render("? or esc to close")
 	body := strings.Join([]string{title, columns, footer}, "\n\n")
 	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
-	background := style.Faint.Render(base)
-	return strings.Join([]string{background, lipgloss.Place(m.ui.width, m.ui.height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+	return lipgloss.Place(m.ui.width, m.ui.height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(style.BackdropTint))
 }
 
 func renderHelpColumn(entries []helpShortcut, width int) string {

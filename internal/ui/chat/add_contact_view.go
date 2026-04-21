@@ -15,14 +15,14 @@ type addContactMenuItem struct {
 	disabled bool
 }
 
-func (m addContactModal) Overlay(base string, width, height int) string {
+func (m addContactModal) Overlay(_ string, width, height int) string {
 	modalWidth := min(max(58, width*2/3), max(40, width-6))
 	modalHeight := min(max(15, height*2/3), max(12, height-4))
 	if modalWidth <= 0 || modalHeight <= 0 {
-		return base
+		return ""
 	}
 
-	title := style.Bright.Bold(true).Render("Add Contact")
+	title := style.ModalTitle.Render("Add Contact")
 	parts := []string{title, m.View(modalWidth-6, modalHeight)}
 	if m.error != "" {
 		parts = append(parts, style.StatusBad.Width(modalWidth-6).Render(m.error))
@@ -30,8 +30,8 @@ func (m addContactModal) Overlay(base string, width, height int) string {
 	parts = append(parts, style.Subtle.Render(m.footer()))
 
 	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(strings.Join(parts, "\n\n"))
-	background := style.Faint.Render(base)
-	return strings.Join([]string{background, lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal)}, "\n")
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(style.BackdropTint))
 }
 
 func (m addContactModal) View(width, modalHeight int) string {
