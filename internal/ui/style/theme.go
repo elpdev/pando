@@ -154,14 +154,18 @@ func Apply(t Theme) {
 
 	PaletteInput = lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(t.Faint)
+		BorderForeground(t.Faint).
+		Background(t.BgModal)
 
-	PaletteItem = lipgloss.NewStyle().Padding(0, 1)
+	PaletteItem = lipgloss.NewStyle().
+		Padding(0, 1).
+		Background(t.BgModal)
 
 	PaletteSelectedItem = lipgloss.NewStyle().
 		Foreground(t.Bright).
 		Bold(true).
-		Padding(0, 1)
+		Padding(0, 1).
+		Background(t.BgModal)
 
 	InputBorder = lipgloss.NewStyle().
 		BorderStyle(lipgloss.NormalBorder()).
