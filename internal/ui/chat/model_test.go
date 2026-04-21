@@ -1792,6 +1792,48 @@ func TestWelcomeCardShownWhenNoContacts(t *testing.T) {
 	}
 }
 
+func TestManifestoCardShownWhenNoChatSelected(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := clientStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+
+	model := New(Deps{
+		Client:    stubClient{},
+		Messaging: service,
+		Mailbox:   "alice",
+		RelayURL:  "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+
+	view := model.View()
+	if !strings.Contains(view, "Why this exists") {
+		t.Fatalf("expected manifesto card title in view: %q", view)
+	}
+	if !strings.Contains(view, "the right to a private conversation is not a feature") {
+		t.Fatalf("expected manifesto quote in view: %q", view)
+	}
+	if !strings.Contains(view, "pando exists because your conversations are nobody's business but yours") {
+		t.Fatalf("expected updated manifesto line in view: %q", view)
+	}
+	if !strings.Contains(view, "Pick a contact from the sidebar, or press ctrl+p to add one.") {
+		t.Fatalf("expected action hint in view: %q", view)
+	}
+}
+
 func TestPeerDetailDrawerToggle(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := messaging.New(clientStore, "alice")
