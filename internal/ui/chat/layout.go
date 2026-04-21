@@ -5,7 +5,6 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/elpdev/pando/internal/ui/media"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -34,11 +33,7 @@ func (m *Model) syncViewportToBottom() {
 }
 
 func (m *Model) viewportContent() string {
-	content := strings.Join(m.msgs.rendered, "\n")
-	if prefix := media.ViewportPrefix(); prefix != "" {
-		return prefix + content
-	}
-	return content
+	return strings.Join(m.msgs.rendered, "\n")
 }
 
 func (m *Model) syncInputPlaceholder() {

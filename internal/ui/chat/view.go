@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/ui/media"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -156,7 +157,7 @@ func (m *Model) renderConversation() string {
 		peerHeading,
 		accentRule,
 		hint,
-		m.viewport.View(),
+		m.renderViewport(),
 		m.renderJumpPill(width),
 		m.renderToast(),
 		m.renderTypingIndicator(),
@@ -164,6 +165,14 @@ func (m *Model) renderConversation() string {
 		m.renderComposer(width),
 	}
 	return lipgloss.NewStyle().Width(width).Render(joinNonEmpty(sections...))
+}
+
+func (m *Model) renderViewport() string {
+	view := m.viewport.View()
+	if prefix := media.ViewportPrefix(); prefix != "" {
+		return prefix + view
+	}
+	return view
 }
 
 func (m *Model) renderPendingAttachment(width int) string {
