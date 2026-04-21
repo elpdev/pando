@@ -4,8 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
+	"strings"
 
 	"github.com/elpdev/pando/internal/config"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func runConfig(args []string) error {
@@ -26,7 +29,7 @@ func runConfig(args []string) error {
 
 func runConfigSet(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox> <value>")
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme> <value>")
 	}
 	switch args[0] {
 	case "relay":
@@ -35,8 +38,10 @@ func runConfigSet(args []string) error {
 		return runConfigSetRelayToken(args[1:])
 	case "mailbox":
 		return runConfigSetMailbox(args[1:])
+	case "theme":
+		return runConfigSetTheme(args[1:])
 	case "help":
-		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox> <value>")
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme> <value>")
 	default:
 		return fmt.Errorf("unknown config set subcommand %q", args[0])
 	}
@@ -57,6 +62,11 @@ func runConfigShow(args []string) error {
 	fmt.Printf("relay_url: %s\n", devCfg.RelayURL)
 	fmt.Printf("relay_token: %s\n", devCfg.RelayToken)
 	fmt.Printf("default_mailbox: %s\n", devCfg.DefaultMailbox)
+	theme := devCfg.Theme
+	if theme == "" {
+		theme = fmt.Sprintf("(default: %s)", style.DefaultThemeName)
+	}
+	fmt.Printf("theme: %s\n", theme)
 	return nil
 }
 
@@ -124,4 +134,41 @@ func runConfigSetMailbox(args []string) error {
 	}
 	fmt.Printf("default_mailbox set to %s\n", devCfg.DefaultMailbox)
 	return nil
+}
+
+func runConfigSetTheme(args []string) error {
+	fs := flag.NewFlagSet("config set theme", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: pando config set theme <%s>", availableThemes())
+	}
+	name := fs.Arg(0)
+	if _, ok := style.Themes[name]; !ok {
+		return fmt.Errorf("unknown theme %q; available: %s", name, availableThemes())
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	devCfg.Theme = name
+	if err := config.SaveDeviceConfig(*rootDir, devCfg); err != nil {
+		return err
+	}
+	fmt.Printf("theme set to %s\n", devCfg.Theme)
+	return nil
+}
+
+// availableThemes returns the registered theme names joined with "|" for
+// usage messages. Sorted so help output is stable across runs.
+func availableThemes() string {
+	names := make([]string, 0, len(style.Themes))
+	for name := range style.Themes {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, "|")
 }

@@ -186,6 +186,7 @@ type DeviceConfig struct {
 	RelayURL       string `yaml:"relay_url,omitempty"`
 	RelayToken     string `yaml:"relay_token,omitempty"`
 	DefaultMailbox string `yaml:"default_mailbox,omitempty"`
+	Theme          string `yaml:"theme,omitempty"`
 }
 
 func DeviceConfigPath(rootDir string) string {

@@ -48,10 +48,31 @@ var Themes = map[string]Theme{
 // reference it without duplicating the string.
 const DefaultThemeName = "phosphor"
 
-// envThemeOverride is the env var callers can set to pick a theme at launch
-// before config-file selection is wired up. Unknown values fall back to the
-// default theme, silently — this is a convenience knob, not a strict API.
+// envThemeOverride is the env var callers can set to force a theme at
+// launch, bypassing the config file. Unknown values fall through to the
+// next source — this is a convenience knob for testing, not a strict API.
 const envThemeOverride = "PANDO_THEME"
+
+// ResolveTheme picks the theme to apply at startup given a theme name from
+// the config file. Precedence (highest wins):
+//
+//  1. PANDO_THEME env var
+//  2. the configured name (caller reads from config.yml)
+//  3. DefaultThemeName
+//
+// Unknown or empty names at any layer silently fall through to the next
+// source, so a bad config value never renders as no-color.
+func ResolveTheme(configured string) Theme {
+	if env := os.Getenv(envThemeOverride); env != "" {
+		if t, ok := Themes[env]; ok {
+			return t
+		}
+	}
+	if t, ok := Themes[configured]; ok {
+		return t
+	}
+	return Themes[DefaultThemeName]
+}
 
 // active is the currently applied theme. Read-only for callers — swap via
 // Apply. Tests and the PeerAccent function consult it directly.
@@ -235,11 +256,10 @@ func phosphorTheme() Theme {
 	}
 }
 
+// init applies the default theme so style tokens are never zero-valued,
+// even for non-TUI commands that import this package purely for helpers
+// like FormatFingerprint. Main clientcmd startup re-applies a theme
+// resolved from config + env via ResolveTheme.
 func init() {
-	name := os.Getenv(envThemeOverride)
-	theme, ok := Themes[name]
-	if !ok {
-		theme = Themes[DefaultThemeName]
-	}
-	Apply(theme)
+	Apply(Themes[DefaultThemeName])
 }

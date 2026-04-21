@@ -14,6 +14,7 @@ import (
 	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui"
 	"github.com/elpdev/pando/internal/ui/chat"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func Execute(args []string) error {
@@ -54,6 +55,8 @@ func Execute(args []string) error {
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid client config: %w", err)
 	}
+
+	style.Apply(style.ResolveTheme(devCfg.Theme))
 
 	clientStore := store.NewClientStore(cfg.DataDir)
 	service, _, err := messaging.New(clientStore, cfg.Mailbox)

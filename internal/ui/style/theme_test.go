@@ -86,3 +86,36 @@ func TestDefaultThemeIsPhosphor(t *testing.T) {
 		t.Errorf("expected DefaultThemeName to be phosphor, got %q", DefaultThemeName)
 	}
 }
+
+func TestResolveThemePrecedence(t *testing.T) {
+	t.Run("empty falls back to default", func(t *testing.T) {
+		t.Setenv(envThemeOverride, "")
+		if got := ResolveTheme("").Name; got != DefaultThemeName {
+			t.Errorf("expected %q, got %q", DefaultThemeName, got)
+		}
+	})
+	t.Run("unknown configured falls back to default", func(t *testing.T) {
+		t.Setenv(envThemeOverride, "")
+		if got := ResolveTheme("not-a-theme").Name; got != DefaultThemeName {
+			t.Errorf("expected %q, got %q", DefaultThemeName, got)
+		}
+	})
+	t.Run("known configured wins over default", func(t *testing.T) {
+		t.Setenv(envThemeOverride, "")
+		if got := ResolveTheme("classic").Name; got != "classic" {
+			t.Errorf("expected classic, got %q", got)
+		}
+	})
+	t.Run("env wins over configured", func(t *testing.T) {
+		t.Setenv(envThemeOverride, "classic")
+		if got := ResolveTheme("phosphor").Name; got != "classic" {
+			t.Errorf("expected env override classic, got %q", got)
+		}
+	})
+	t.Run("unknown env falls through to configured", func(t *testing.T) {
+		t.Setenv(envThemeOverride, "not-a-theme")
+		if got := ResolveTheme("classic").Name; got != "classic" {
+			t.Errorf("expected configured classic, got %q", got)
+		}
+	})
+}
