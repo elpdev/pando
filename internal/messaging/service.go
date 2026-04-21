@@ -84,7 +84,7 @@ func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
 	return &Service{
 		store:               store,
 		identity:            id,
-		incomingAttachments: newIncomingAttachmentAssembler(store),
+		incomingAttachments: newIncomingAttachmentAssembler(store, id),
 	}, created, nil
 }
 
@@ -147,4 +147,8 @@ func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time, at
 
 func (s *Service) MarkDelivered(peerMailbox, messageID string, deliveredAt time.Time) error {
 	return s.store.MarkHistoryDelivered(s.identity, peerMailbox, messageID, deliveredAt)
+}
+
+func (s *Service) AttachmentBytes(path string) ([]byte, error) {
+	return s.store.ReadAttachment(s.identity, path)
 }

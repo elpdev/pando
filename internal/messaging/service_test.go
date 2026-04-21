@@ -67,7 +67,7 @@ func TestHandleIncomingContactUpdateRefreshesStoredDevices(t *testing.T) {
 	if err := bobStore.SaveContact(aliceContact); err != nil {
 		t.Fatalf("save alice contact: %v", err)
 	}
-	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore)}
+	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore, bob)}
 
 	result, err := bobService.HandleIncoming(batch.Envelopes[0])
 	if err != nil {
@@ -156,7 +156,7 @@ func TestHandleIncomingSkipsDuplicateEnvelopeIDs(t *testing.T) {
 	if err := bobStore.SaveContact(aliceContact); err != nil {
 		t.Fatalf("save alice contact: %v", err)
 	}
-	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore)}
+	bobService := &Service{store: bobStore, identity: bob, incomingAttachments: newIncomingAttachmentAssembler(bobStore, bob)}
 
 	first, err := bobService.HandleIncoming(chatEnvelope)
 	if err != nil {
@@ -619,12 +619,19 @@ func TestPhotoChunkRoundTripStoresAttachment(t *testing.T) {
 	if len(attachmentPaths) != 1 {
 		t.Fatalf("expected one stored attachment, got %v", attachmentPaths)
 	}
-	storedBytes, err := os.ReadFile(attachmentPaths[0])
+	storedBytes, err := bobStore.ReadAttachment(bobService.Identity(), attachmentPaths[0])
 	if err != nil {
 		t.Fatalf("read stored attachment: %v", err)
 	}
 	if string(storedBytes) != string(photoBytes) {
 		t.Fatal("stored attachment bytes did not match original photo")
+	}
+	onDisk, err := os.ReadFile(attachmentPaths[0])
+	if err != nil {
+		t.Fatalf("read encrypted attachment: %v", err)
+	}
+	if string(onDisk) == string(photoBytes) {
+		t.Fatal("expected photo attachment on disk to remain encrypted")
 	}
 	if len(finalResult.AckEnvelopes) != 0 {
 		t.Fatalf("expected no delivery ack for photo chunks, got %d", len(finalResult.AckEnvelopes))
@@ -656,7 +663,7 @@ func TestHandleIncomingAttachmentChunkCleansUpExpiredTransfers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	service.incomingAttachments = &incomingAttachmentAssembler{store: service.store, pending: map[string]*incomingAttachment{
+	service.incomingAttachments = &incomingAttachmentAssembler{identity: service.Identity(), store: service.store, pending: map[string]*incomingAttachment{
 		"alice:stale": {
 			attachmentType: AttachmentTypePhoto,
 			filename:       "stale.png",
@@ -792,7 +799,7 @@ func TestPhotoTransferOverRelayEndToEnd(t *testing.T) {
 	if len(attachments) != 1 {
 		t.Fatalf("expected one alice attachment, got %v", attachments)
 	}
-	saved, err := os.ReadFile(attachments[0])
+	saved, err := aliceStore.ReadAttachment(aliceService.Identity(), attachments[0])
 	if err != nil {
 		t.Fatalf("read saved attachment: %v", err)
 	}
@@ -874,7 +881,7 @@ func TestVoiceChunkRoundTripStoresAttachment(t *testing.T) {
 	if len(attachmentPaths) != 1 {
 		t.Fatalf("expected one stored attachment, got %v", attachmentPaths)
 	}
-	storedBytes, err := os.ReadFile(attachmentPaths[0])
+	storedBytes, err := bobStore.ReadAttachment(bobService.Identity(), attachmentPaths[0])
 	if err != nil {
 		t.Fatalf("read stored attachment: %v", err)
 	}
@@ -994,7 +1001,7 @@ func TestFileChunkRoundTripStoresAttachment(t *testing.T) {
 	if len(attachmentPaths) != 1 {
 		t.Fatalf("expected one stored attachment, got %v", attachmentPaths)
 	}
-	storedBytes, err := os.ReadFile(attachmentPaths[0])
+	storedBytes, err := bobStore.ReadAttachment(bobService.Identity(), attachmentPaths[0])
 	if err != nil {
 		t.Fatalf("read stored attachment: %v", err)
 	}

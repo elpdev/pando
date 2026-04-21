@@ -1,6 +1,8 @@
 package store
 
 import (
+	"bytes"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -32,21 +34,56 @@ func TestMarkContactVerified(t *testing.T) {
 
 func TestSaveAttachmentRejectsTraversalComponents(t *testing.T) {
 	clientStore := NewClientStore(t.TempDir())
-	if _, err := clientStore.SaveAttachment("../bob", "file-1", "photo.png", []byte("hello")); err == nil {
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	if _, err := clientStore.SaveAttachment(id, "../bob", "file-1", "photo.png", []byte("hello")); err == nil {
 		t.Fatal("expected traversal mailbox to be rejected")
 	}
-	if _, err := clientStore.SaveAttachment("bob", "../file-1", "photo.png", []byte("hello")); err == nil {
+	if _, err := clientStore.SaveAttachment(id, "bob", "../file-1", "photo.png", []byte("hello")); err == nil {
 		t.Fatal("expected traversal attachment id to be rejected")
 	}
 }
 
 func TestSaveAttachmentReplacesSpacesInFilename(t *testing.T) {
 	clientStore := NewClientStore(t.TempDir())
-	path, err := clientStore.SaveAttachment("bob", "file-1", "my photo clip.m4a", []byte("hello"))
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	path, err := clientStore.SaveAttachment(id, "bob", "file-1", "my photo clip.m4a", []byte("hello"))
 	if err != nil {
 		t.Fatalf("save attachment: %v", err)
 	}
 	if got, want := filepath.Base(path), "file-1-my_photo_clip.m4a"; got != want {
 		t.Fatalf("unexpected saved filename: got %q want %q", got, want)
+	}
+}
+
+func TestSaveAttachmentEncryptsBytesAndReadAttachmentDecrypts(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	original := []byte("hello attachment")
+	path, err := clientStore.SaveAttachment(id, "bob", "file-1", "photo.png", original)
+	if err != nil {
+		t.Fatalf("save attachment: %v", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read attachment: %v", err)
+	}
+	if bytes.Equal(onDisk, original) {
+		t.Fatal("expected attachment bytes on disk to be encrypted")
+	}
+	plaintext, err := clientStore.ReadAttachment(id, path)
+	if err != nil {
+		t.Fatalf("read attachment plaintext: %v", err)
+	}
+	if !bytes.Equal(plaintext, original) {
+		t.Fatal("expected decrypted attachment bytes to match original")
 	}
 }

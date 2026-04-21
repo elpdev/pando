@@ -313,7 +313,13 @@ func (m *Model) renderAttachmentPreview(item *messageItem) string {
 	if item.imageRendered != "" && item.imageWidth == imageWidth {
 		return indentBlock(item.imageRendered, "  ")
 	}
-	block, _, err := media.RenderFile(item.attachment.LocalPath, imageWidth)
+	bytes, err := m.messaging.AttachmentBytes(item.attachment.LocalPath)
+	if err != nil {
+		item.imageRendered = ""
+		item.imageWidth = imageWidth
+		return ""
+	}
+	block, _, err := media.RenderBytes(bytes, imageWidth)
 	if err != nil || block == "" {
 		item.imageRendered = ""
 		item.imageWidth = imageWidth

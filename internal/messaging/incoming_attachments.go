@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/store"
 )
 
@@ -16,12 +17,13 @@ const (
 )
 
 type incomingAttachmentAssembler struct {
-	store   *store.ClientStore
-	pending map[string]*incomingAttachment
+	identity *identity.Identity
+	store    *store.ClientStore
+	pending  map[string]*incomingAttachment
 }
 
-func newIncomingAttachmentAssembler(store *store.ClientStore) *incomingAttachmentAssembler {
-	return &incomingAttachmentAssembler{store: store, pending: make(map[string]*incomingAttachment)}
+func newIncomingAttachmentAssembler(store *store.ClientStore, id *identity.Identity) *incomingAttachmentAssembler {
+	return &incomingAttachmentAssembler{identity: id, store: store, pending: make(map[string]*incomingAttachment)}
 }
 
 func (a *incomingAttachmentAssembler) handleChunk(peerAccountID string, chunk *attachmentChunkPayload) (*store.AttachmentRecord, bool, error) {
@@ -88,7 +90,7 @@ func (a *incomingAttachmentAssembler) handleChunk(peerAccountID string, chunk *a
 	if pending.totalSize > 0 && len(assembled) != pending.totalSize {
 		return nil, false, fmt.Errorf("attachment transfer size mismatch")
 	}
-	path, err := a.store.SaveAttachment(peerAccountID, chunk.AttachmentID, pending.filename, assembled)
+	path, err := a.store.SaveAttachment(a.identity, peerAccountID, chunk.AttachmentID, pending.filename, assembled)
 	if err != nil {
 		return nil, false, err
 	}

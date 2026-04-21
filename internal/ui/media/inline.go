@@ -42,6 +42,14 @@ func DetectProtocol() Protocol {
 }
 
 func RenderFile(path string, maxCols int) (string, int, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", 0, fmt.Errorf("read image: %w", err)
+	}
+	return RenderBytes(data, maxCols)
+}
+
+func RenderBytes(data []byte, maxCols int) (string, int, error) {
 	protocol := DetectProtocol()
 	if protocol == ProtocolNone || protocol == ProtocolSixel {
 		return "", 0, nil
@@ -49,8 +57,8 @@ func RenderFile(path string, maxCols int) (string, int, error) {
 	if maxCols < 8 {
 		maxCols = 8
 	}
-	rows := estimateImageRows(path, maxCols)
-	seq, err := renderFile(path, maxCols, rows, protocol)
+	rows := estimateImageRows(data, maxCols)
+	seq, err := renderBytes(data, maxCols, rows, protocol)
 	if err != nil {
 		return "", 0, err
 	}
@@ -71,27 +79,31 @@ func ViewportPrefix() string {
 }
 
 func renderFile(path string, maxCols, rows int, protocol Protocol) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read image: %w", err)
+	}
+	return renderBytes(data, maxCols, rows, protocol)
+}
+
+func renderBytes(data []byte, maxCols, rows int, protocol Protocol) (string, error) {
 	switch protocol {
 	case ProtocolITerm2:
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return "", fmt.Errorf("read image: %w", err)
-		}
 		encoded := base64.StdEncoding.EncodeToString(data)
 		return ansi.ITerm2(fmt.Sprintf("File=inline=1;width=%d;preserveAspectRatio=1:%s", maxCols, encoded)), nil
 	case ProtocolKitty:
-		return renderKitty(path, maxCols, rows)
+		return renderKitty(data, maxCols, rows)
 	default:
 		return "", nil
 	}
 }
 
-func renderKitty(path string, maxCols, rows int) (string, error) {
-	data, err := kittyPayload(path)
+func renderKitty(data []byte, maxCols, rows int) (string, error) {
+	payload, err := kittyPayload(data)
 	if err != nil {
 		return "", err
 	}
-	encoded := base64.StdEncoding.EncodeToString(data)
+	encoded := base64.StdEncoding.EncodeToString(payload)
 	const chunkSize = 4096
 	var b strings.Builder
 	for i := 0; i < len(encoded); i += chunkSize {
@@ -119,13 +131,8 @@ func renderKitty(path string, maxCols, rows int) (string, error) {
 	return b.String(), nil
 }
 
-func kittyPayload(path string) ([]byte, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, fmt.Errorf("open image: %w", err)
-	}
-	defer file.Close()
-	img, _, err := image.Decode(file)
+func kittyPayload(data []byte) ([]byte, error) {
+	img, _, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
 		return nil, fmt.Errorf("decode image: %w", err)
 	}
@@ -156,17 +163,15 @@ func supportsSixel(term string) bool {
 	return false
 }
 
-func estimateImageRows(path string, maxCols int) int {
+func estimateImageRows(data []byte, maxCols int) int {
 	const (
 		minRows = 4
 		maxRows = 18
 	)
-	file, err := os.Open(path)
-	if err != nil {
+	if len(data) == 0 {
 		return min(maxCols/2, maxRows)
 	}
-	defer file.Close()
-	config, _, err := image.DecodeConfig(file)
+	config, _, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil || config.Width <= 0 || config.Height <= 0 {
 		return min(max(maxCols/2, minRows), maxRows)
 	}
