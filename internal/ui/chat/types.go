@@ -17,6 +17,7 @@ type Deps struct {
 	RelayURL           string
 	RelayToken         string
 	RelayClientFactory func(url, token string) (RelayClient, error)
+	SaveTheme          func(name string) error
 }
 
 // Dependencies.

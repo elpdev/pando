@@ -33,6 +33,9 @@ func (m *Model) View() string {
 	if m.addContact.open {
 		return m.clearInlineMedia(m.addContact.Overlay(view, m.ui.width, m.ui.height))
 	}
+	if m.commandPalette.open {
+		return m.clearInlineMedia(m.commandPalette.View(m.ui.width, m.ui.height, m.PeerLabel()))
+	}
 	if m.peerDetailOpen {
 		return m.clearInlineMedia(m.renderPeerDetailModal(view))
 	}
@@ -43,7 +46,7 @@ func (m *Model) renderSidebar() string {
 	title := style.Bold.Render("Contacts")
 	lines := []string{title, style.Subtle.Render(fmt.Sprintf("%d chats", len(m.contacts)))}
 	if len(m.contacts) == 0 {
-		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+n."))
+		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+p and choose Add contact."))
 	} else {
 		for idx, contact := range m.contacts {
 			isCursor := idx == m.selectedIndex
@@ -129,7 +132,7 @@ func (m *Model) renderConversation() string {
 				rule,
 				"",
 				step("1.", "share your code", "pando identity invite-code --copy"),
-				step("2.", "import theirs", "ctrl+n  (or pando contact add --paste)"),
+				step("2.", "import theirs", "ctrl+p, then Add contact  (or pando contact add --paste)"),
 				step("3.", "start typing", "pick them in the sidebar, then hit enter"),
 			}, "\n")
 			card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
@@ -137,7 +140,7 @@ func (m *Model) renderConversation() string {
 		}
 		lines := []string{
 			style.Bold.Render("No chat selected"),
-			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+n to import another."),
+			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+p and choose Add contact."),
 		}
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
 	}

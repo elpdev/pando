@@ -175,6 +175,18 @@ func drainMsg(t *testing.T, model *Model, cmd tea.Cmd) {
 	}
 }
 
+func openAddContactViaPalette(t *testing.T, model *Model) {
+	t.Helper()
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	drainMsg(t, model, cmd)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("contact")})
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	drainMsg(t, model, cmd)
+	if !model.addContact.open {
+		t.Fatal("expected add contact modal to open from command palette")
+	}
+}
+
 func TestAddContactLookupAppliesRelayDirectoryTrust(t *testing.T) {
 	peer, _, err := messaging.New(store.NewClientStore(t.TempDir()), "carol")
 	if err != nil {
@@ -185,7 +197,7 @@ func TestAddContactLookupAppliesRelayDirectoryTrust(t *testing.T) {
 
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	if model.addContact.mode != addContactModeLookup {
 		t.Fatalf("expected lookup mode, got %v", model.addContact.mode)
@@ -222,7 +234,7 @@ func TestAddContactLookupValidationRequiresMailbox(t *testing.T) {
 	relay := newFakeRelay()
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
@@ -247,7 +259,7 @@ func TestAddContactInviteAcceptAppliesInviteCodeTrust(t *testing.T) {
 
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	if model.addContact.mode != addContactModeInviteAccept {
@@ -286,7 +298,7 @@ func TestAddContactInviteStartGeneratesCodeAndUploadsPayload(t *testing.T) {
 	// to observe the start-side state, not wait for completion.
 	relay.getGate = make(chan struct{})
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	_, startCmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")})
 	if startCmd == nil {
@@ -356,7 +368,7 @@ func TestAddContactInviteEscCancelsPolling(t *testing.T) {
 	relay.getGate = make(chan struct{}) // block until we say otherwise
 
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("12345-67890")})
@@ -414,7 +426,7 @@ func TestAddContactInviteEscCancelsPolling(t *testing.T) {
 func TestAddContactChooserDisablesRelayPathsWithoutRelay(t *testing.T) {
 	model, _ := newChatModel(t, "alice", nil, "")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	if cmd != nil {
 		t.Fatal("expected no lookup command without relay")
@@ -439,7 +451,7 @@ func TestAddContactChooserArrowNavigationUsesSelectedAction(t *testing.T) {
 	relay := newFakeRelay()
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
@@ -452,7 +464,7 @@ func TestAddContactInviteChoiceArrowNavigationUsesSelectedAction(t *testing.T) {
 	relay := newFakeRelay()
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -467,7 +479,7 @@ func TestAddContactLookupSurfacesRelayError(t *testing.T) {
 	relay.lookupErr = errors.New("relay 500")
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("l")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("carol")})
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -485,7 +497,7 @@ func TestAddContactInviteAcceptValidationRejectsEmptyCode(t *testing.T) {
 	relay := newFakeRelay()
 	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openAddContactViaPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})

@@ -352,7 +352,7 @@ func TestEnterWithoutActiveChatPromptsForSidebarSelection(t *testing.T) {
 	}
 }
 
-func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
+func TestCommandPaletteOpensAddContactModalAndEscClosesIt(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")
 	if err != nil {
@@ -367,7 +367,7 @@ func TestCtrlNOpensAndEscClosesAddContactModal(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openPaletteCommand(t, model, "contact")
 	if !model.addContact.open {
 		t.Fatal("expected add contact modal to open")
 	}
@@ -410,7 +410,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openPaletteCommand(t, model, "contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(code), Paste: true})
 	// First ctrl+s parses the invite locally and shows a preview; no command.
@@ -484,7 +484,7 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openPaletteCommand(t, model, "contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
 	// First ctrl+s parses; second ctrl+s commits.
@@ -521,7 +521,7 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 	model.SetSize(100, 20)
 	badInvite := "not a valid invite"
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	openPaletteCommand(t, model, "contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(badInvite), Paste: true})
 	// With the preview step, a bad paste surfaces the decode error synchronously
@@ -1041,7 +1041,7 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	model.SetSize(100, 20)
 	model.filePicker.dir = pickerDir
 
-	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	updated, cmd := openPaletteCommand(t, model, "attach")
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
@@ -1120,7 +1120,7 @@ func TestFilePickerNavigatesDirectoriesAndCancels(t *testing.T) {
 	model.SetSize(100, 20)
 	model.filePicker.dir = pickerRoot
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	openPaletteCommand(t, model, "attach")
 	if !model.filePicker.open {
 		t.Fatal("expected file picker to open")
 	}
@@ -1637,6 +1637,88 @@ func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 	}
 }
 
+func TestCtrlPOpensCommandPalette(t *testing.T) {
+	model := newHelpTestModel(t)
+
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	if cmd != nil {
+		drainMsg(t, model, cmd)
+	}
+	if !model.commandPalette.open {
+		t.Fatal("expected ctrl+p to open command palette")
+	}
+	if !strings.Contains(model.View(), "Command Palette") {
+		t.Fatalf("expected command palette in view: %q", model.View())
+	}
+}
+
+func TestCommandPaletteFiltersByAlias(t *testing.T) {
+	model := newHelpTestModel(t)
+	openPalette(t, model)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("appearance")})
+	items := model.commandPalette.visibleItems(false)
+	if len(items) != 1 {
+		t.Fatalf("expected one visible command after alias filter, got %d", len(items))
+	}
+	if items[0].item.id != string(commandPaletteCommandThemes) {
+		t.Fatalf("expected themes command after alias filter, got %q", items[0].item.id)
+	}
+}
+
+func TestCommandPaletteAppliesAndPersistsTheme(t *testing.T) {
+	prev := style.Current()
+	t.Cleanup(func() { style.Apply(prev) })
+
+	savedTheme := ""
+	model := newHelpTestModel(t)
+	model.commandPalette.deps.saveTheme = func(name string) error {
+		savedTheme = name
+		return nil
+	}
+
+	if style.Current().Name != style.DefaultThemeName {
+		style.Apply(style.Themes[style.DefaultThemeName])
+	}
+	openPalette(t, model)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !model.commandPalette.open || model.commandPalette.mode != commandPaletteModeThemes {
+		t.Fatal("expected enter on themes command to open theme submenu")
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("classic")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if style.Current().Name != "classic" {
+		t.Fatalf("expected active theme classic, got %q", style.Current().Name)
+	}
+	if savedTheme != "classic" {
+		t.Fatalf("expected theme save callback for classic, got %q", savedTheme)
+	}
+	if model.commandPalette.open {
+		t.Fatal("expected theme selection to close command palette")
+	}
+}
+
+func TestCommandPaletteEscReturnsFromThemeSubmenu(t *testing.T) {
+	model := newHelpTestModel(t)
+	openPalette(t, model)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if model.commandPalette.mode != commandPaletteModeThemes {
+		t.Fatal("expected theme submenu to open")
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !model.commandPalette.open {
+		t.Fatal("expected esc in theme submenu to keep palette open")
+	}
+	if model.commandPalette.mode != commandPaletteModeRoot {
+		t.Fatal("expected esc in theme submenu to return to root palette")
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected esc in root palette to close it")
+	}
+}
+
 func TestTabTogglesFocus(t *testing.T) {
 	model := newHelpTestModel(t)
 
@@ -1738,9 +1820,9 @@ func TestPeerDetailDrawerToggle(t *testing.T) {
 	})
 	model.SetSize(120, 24)
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	openPaletteCommand(t, model, "detail")
 	if !model.peerDetailOpen {
-		t.Fatal("expected ctrl+p to open peer detail")
+		t.Fatal("expected palette command to open peer detail")
 	}
 	view := model.View()
 	if !strings.Contains(view, "Peer detail") {
@@ -1780,7 +1862,7 @@ func TestFilePickerRendersSizesAndParentEntry(t *testing.T) {
 	model.SetSize(100, 20)
 	model.filePicker.dir = dir
 
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlO})
+	openPaletteCommand(t, model, "attach")
 	if !model.filePicker.open {
 		t.Fatal("expected picker to open")
 	}
@@ -1821,6 +1903,25 @@ func newHelpTestModel(t *testing.T) *Model {
 	})
 	model.SetSize(120, 20)
 	return model
+}
+
+func openPalette(t *testing.T, model *Model) {
+	t.Helper()
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	drainMsg(t, model, cmd)
+	if !model.commandPalette.open {
+		t.Fatal("expected command palette to be open")
+	}
+}
+
+func openPaletteCommand(t *testing.T, model *Model, query string) (*Model, tea.Cmd) {
+	t.Helper()
+	openPalette(t, model)
+	if query != "" {
+		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(query)})
+	}
+	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	return updated, cmd
 }
 
 func stringsContainsAny(lines []string, needle string) bool {

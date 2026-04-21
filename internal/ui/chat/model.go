@@ -41,6 +41,7 @@ type Model struct {
 	pending       *pendingAttachment
 
 	filePicker     filePickerModel
+	commandPalette commandPaletteModel
 	addContact     addContactModal
 	helpOpen       bool
 	peerDetailOpen bool
@@ -94,7 +95,14 @@ func New(deps Deps) *Model {
 		viewport:      vp,
 		selectedIndex: -1,
 		filePicker:    newFilePickerModel(),
-		unread:        map[string]int{},
+		commandPalette: newCommandPaletteModel(commandPaletteDeps{
+			applyTheme: style.Apply,
+			currentTheme: func() string {
+				return style.Current().Name
+			},
+			saveTheme: deps.SaveTheme,
+		}),
+		unread: map[string]int{},
 	}
 	m.addContact = newAddContactModal(addContactDeps{
 		messaging:         deps.Messaging,
@@ -355,6 +363,16 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 	if m.helpOpen {
 		return true, m.handleHelpKey(keyMsg)
 	}
+	if m.commandPalette.open {
+		action, cmd := m.commandPalette.Update(msg)
+		if action != nil {
+			return true, m.handleCommandPaletteAction(*action)
+		}
+		if !m.commandPalette.open && m.ui.focus == focusChat {
+			m.input.Focus()
+		}
+		return true, cmd
+	}
 	if m.filePicker.open {
 		var cmd tea.Cmd
 		m.filePicker, cmd = m.filePicker.Update(msg)
@@ -462,8 +480,53 @@ func (m *Model) handleHelpKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
-	if msg.Type == tea.KeyEsc || msg.Type == tea.KeyCtrlP {
+	if msg.Type == tea.KeyEsc {
 		m.peerDetailOpen = false
+		if m.ui.focus == focusChat {
+			m.input.Focus()
+		}
+	}
+	return nil
+}
+
+func (m *Model) openCommandPalette() tea.Cmd {
+	m.commandPalette.SyncContext(m.peer.mailbox != "")
+	m.input.Blur()
+	return m.commandPalette.Open()
+}
+
+func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd {
+	switch action.command {
+	case commandPaletteCommandAddContact:
+		m.openAddContactModal()
+		return nil
+	case commandPaletteCommandAttachFile:
+		return m.handleAttachKey()
+	case commandPaletteCommandPeerDetail:
+		if m.peer.mailbox != "" {
+			m.peerDetailOpen = true
+		}
+		return nil
+	case commandPaletteCommandThemes:
+		return m.applyPaletteTheme(action.themeName)
+	default:
+		return nil
+	}
+}
+
+func (m *Model) applyPaletteTheme(name string) tea.Cmd {
+	theme, ok := style.Themes[name]
+	if !ok {
+		m.pushToast(fmt.Sprintf("unknown theme %q", name), ToastBad)
+		return nil
+	}
+	style.Apply(theme)
+	m.pushToast(fmt.Sprintf("theme set to %s", name), ToastInfo)
+	if m.commandPalette.deps.saveTheme == nil {
+		return nil
+	}
+	if err := m.commandPalette.deps.saveTheme(name); err != nil {
+		m.pushToast(fmt.Sprintf("theme applied but not saved: %v", err), ToastWarn)
 	}
 	return nil
 }
@@ -724,10 +787,16 @@ func (m *Model) keyHintSegment() string {
 	if m.filePicker.open {
 		return style.Muted.Render("type filter  up/down browse  enter select  backspace up  esc close")
 	}
-	if m.ui.focus == focusSidebar {
-		return style.Muted.Render("up/down browse  enter open  tab chat  ctrl+n add  ? help")
+	if m.commandPalette.open {
+		if m.commandPalette.mode == commandPaletteModeThemes {
+			return style.Muted.Render("type filter  up/down browse  enter apply  esc back")
+		}
+		return style.Muted.Render("type filter  up/down browse  enter select  esc close")
 	}
-	hints := []string{"enter send", "shift+enter newline", "tab sidebar", "ctrl+o attach", "ctrl+p details", "? help"}
+	if m.ui.focus == focusSidebar {
+		return style.Muted.Render("up/down browse  enter open  ctrl+p commands  tab chat  ? help")
+	}
+	hints := []string{"enter send", "shift+enter newline", "ctrl+p commands", "tab sidebar", "? help"}
 	if m.pending != nil {
 		hints = append([]string{"esc clear attachment"}, hints...)
 	}

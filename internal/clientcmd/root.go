@@ -78,6 +78,14 @@ func Execute(args []string) error {
 		RecipientMailbox: cfg.RecipientMailbox,
 		RelayURL:         cfg.RelayURL,
 		RelayToken:       cfg.RelayToken,
+		SaveTheme: func(name string) error {
+			devCfg, err := config.LoadDeviceConfig(rootDir)
+			if err != nil {
+				return err
+			}
+			devCfg.Theme = name
+			return config.SaveDeviceConfig(rootDir, devCfg)
+		},
 	})
 
 	program := tea.NewProgram(ui.New(chatModel), tea.WithAltScreen())

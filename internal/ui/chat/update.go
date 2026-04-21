@@ -46,15 +46,8 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 		}
 		return m, nil
 	}
-	if msg.Type == tea.KeyCtrlN {
-		m.openAddContactModal()
-		return m, nil
-	}
 	if msg.Type == tea.KeyCtrlP {
-		if m.peer.mailbox != "" {
-			m.peerDetailOpen = true
-		}
-		return m, nil
+		return m, m.openCommandPalette()
 	}
 	switch msg.Type {
 	case tea.KeyUp:
@@ -82,8 +75,6 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 		}
 		m.moveSelection(1)
 		return m, nil
-	case tea.KeyCtrlO:
-		return m, m.handleAttachKey()
 	case tea.KeyEnter:
 		if msg.String() == "shift+enter" || msg.Alt {
 			return nil, nil

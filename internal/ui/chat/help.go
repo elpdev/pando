@@ -14,7 +14,7 @@ type helpShortcut struct {
 
 var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts or draft history"}, {"pgup / pgdn", "scroll messages"}, {"home / end", "jump transcript top/bottom"}, {"tab", "switch pane"}, {"ctrl+c", "quit"}}
 
-var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+n", "add contact"}, {"ctrl+o", "queue file attachment"}, {"ctrl+p", "peer detail"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "clear attachment or close overlay"}, {"?", "toggle this help"}}
+var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+p", "open command palette"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "clear attachment or close overlay"}, {"?", "toggle this help"}}
 
 func (m *Model) renderHelpModal(_ string) string {
 	modalWidth := min(max(64, m.ui.width*2/3), max(40, m.ui.width-6))
