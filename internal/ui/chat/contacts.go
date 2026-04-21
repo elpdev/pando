@@ -142,6 +142,7 @@ func (m *Model) loadHistory() {
 		}
 		for _, record := range records {
 			item := messageItem{
+				kind:      transcriptMessage,
 				direction: "inbound",
 				sender:    record.SenderAccountID,
 				body:      record.Body,
@@ -174,6 +175,7 @@ func (m *Model) loadHistory() {
 	}
 	for _, record := range records {
 		item := messageItem{
+			kind:         transcriptMessage,
 			direction:    record.Direction,
 			body:         record.Body,
 			timestamp:    record.Timestamp,

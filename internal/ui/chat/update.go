@@ -16,12 +16,34 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 		m.helpOpen = true
 		return m, nil
 	}
+	if msg.Type == tea.KeyEsc && m.pending != nil && m.ui.focus == focusChat {
+		m.clearPendingAttachment()
+		return m, nil
+	}
 	if msg.Type == tea.KeyTab {
 		m.toggleFocus()
 		return m, nil
 	}
 	if msg.Type == tea.KeyEnd || (msg.Type == tea.KeyRunes && string(msg.Runes) == "G" && m.input.Value() == "") {
 		m.jumpToLatest()
+		return m, nil
+	}
+	if msg.Type == tea.KeyHome && m.ui.focus == focusChat {
+		m.msgs.followLatest = false
+		m.viewport.GotoTop()
+		return m, nil
+	}
+	if msg.Type == tea.KeyPgUp && m.ui.focus == focusChat {
+		m.msgs.followLatest = false
+		m.viewport.PageUp()
+		return m, nil
+	}
+	if msg.Type == tea.KeyPgDown && m.ui.focus == focusChat {
+		m.viewport.PageDown()
+		m.msgs.followLatest = m.viewport.AtBottom()
+		if m.msgs.followLatest {
+			m.msgs.pendingIncoming = 0
+		}
 		return m, nil
 	}
 	if msg.Type == tea.KeyCtrlN {
@@ -36,14 +58,36 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	}
 	switch msg.Type {
 	case tea.KeyUp:
+		if m.ui.focus == focusChat && m.input.Value() == "" && m.browseDraftHistory(-1) {
+			return m, nil
+		}
+		if m.ui.focus == focusChat {
+			m.msgs.followLatest = false
+			m.viewport.LineUp(1)
+			return m, nil
+		}
 		m.moveSelection(-1)
 		return m, nil
 	case tea.KeyDown:
+		if m.ui.focus == focusChat && m.input.Value() == "" && m.browseDraftHistory(1) {
+			return m, nil
+		}
+		if m.ui.focus == focusChat {
+			m.viewport.LineDown(1)
+			m.msgs.followLatest = m.viewport.AtBottom()
+			if m.msgs.followLatest {
+				m.msgs.pendingIncoming = 0
+			}
+			return m, nil
+		}
 		m.moveSelection(1)
 		return m, nil
 	case tea.KeyCtrlO:
 		return m, m.handleAttachKey()
 	case tea.KeyEnter:
+		if msg.String() == "shift+enter" || msg.Alt {
+			return nil, nil
+		}
 		return m.handleEnterKey()
 	default:
 		return nil, nil
@@ -82,6 +126,19 @@ func (m *Model) handleAttachKey() tea.Cmd {
 
 func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	body := strings.TrimSpace(m.input.Value())
+	if body == "" && m.pending != nil {
+		if err := m.guardCanSend(); err != nil {
+			level := ToastWarn
+			if m.conn.authFailed {
+				level = ToastBad
+			}
+			m.pushToast(err.Error(), level)
+			return m, nil
+		}
+		cmd := m.consumePendingAttachment()
+		m.resetLocalTypingState()
+		return m, cmd
+	}
 	if body == "" {
 		previousRecipient := m.peer.mailbox
 		if !m.activateSelectedContact() {
@@ -95,6 +152,7 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 			}
 			m.syncRoomContact(state)
 			m.loadHistory()
+			m.appendEventItem(time.Now().UTC(), fmt.Sprintf("joined %s", messaging.DefaultRoomLabel()), "room")
 			m.pushToast(fmt.Sprintf("joined %s", messaging.DefaultRoomLabel()), ToastInfo)
 			return m, tea.Batch(m.sendRoomCmd(m.peer.mailbox, "", batch), m.sendRoomHistorySyncCmd())
 		}
@@ -117,14 +175,16 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	if strings.HasPrefix(body, "/send-file") {
 		return m.handleAttachmentCommand("/send-file", body, m.messaging.PrepareFileOutgoing)
 	}
+	m.rememberDraft(body)
 	if m.peer.isRoom {
 		batch, err := m.messaging.EncryptDefaultRoomOutgoing(body)
 		if err != nil {
 			m.pushToast(err.Error(), ToastBad)
 			return m, nil
 		}
-		m.appendMessageItem(messageItem{direction: "outbound", sender: m.messaging.Identity().AccountID, body: body, timestamp: time.Now().UTC(), messageID: batchMessageID(batch), status: statusPending})
+		m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "outbound", sender: m.messaging.Identity().AccountID, body: body, timestamp: time.Now().UTC(), messageID: batchMessageID(batch), status: statusPending})
 		m.input.SetValue("")
+		m.syncComposer()
 		m.resetLocalTypingState()
 		m.syncViewportToBottom()
 		return m, m.sendRoomCmd(m.peer.mailbox, body, batch)
@@ -135,6 +195,7 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 		return m, nil
 	}
 	m.appendMessageItem(messageItem{
+		kind:      transcriptMessage,
 		direction: "outbound",
 		sender:    m.mailbox,
 		body:      body,
@@ -143,6 +204,7 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 		status:    statusPending,
 	})
 	m.input.SetValue("")
+	m.syncComposer()
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
 	return m, m.sendCmd(m.peer.mailbox, body, batch)
@@ -195,6 +257,7 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 	if msg.err != nil {
 		m.updateMessageStatus(msg.messageID, statusFailed)
 		m.syncViewport()
+		m.appendEventItem(time.Now().UTC(), fmt.Sprintf("send failed: %v", msg.err), "error")
 		m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
 		return m, nil
 	}
@@ -245,6 +308,7 @@ func (m *Model) handleRoomHistorySyncResultMsg(msg roomHistorySyncResultMsg) (*M
 		return m, nil
 	}
 	if msg.requestID != "" {
+		m.appendEventItem(time.Now().UTC(), "syncing recent room history", "sync")
 		m.pushToast("syncing recent room history...", ToastInfo)
 	}
 	return m, nil

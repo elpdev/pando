@@ -119,6 +119,7 @@ func TestGlyphsAreNonEmpty(t *testing.T) {
 		GlyphVerified, GlyphUnverified,
 		GlyphDeliveryPending, GlyphDeliverySent, GlyphDeliveryDelivered, GlyphDeliveryFailed,
 		GlyphCursorRow, GlyphActiveChat, GlyphUnreadDot, GlyphJumpToLatest,
+		GlyphPrompt,
 		GroupSep,
 	}
 	for i, g := range glyphs {

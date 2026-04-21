@@ -12,9 +12,9 @@ type helpShortcut struct {
 	desc string
 }
 
-var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts"}, {"⏎", "open selected chat / send"}, {"tab", "switch pane"}, {"end / G", "jump to latest message"}, {"ctrl+c", "quit"}}
+var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts or draft history"}, {"pgup / pgdn", "scroll messages"}, {"home / end", "jump transcript top/bottom"}, {"tab", "switch pane"}, {"ctrl+c", "quit"}}
 
-var helpSectionMessaging = []helpShortcut{{"ctrl+n", "add contact"}, {"ctrl+o", "attach file"}, {"ctrl+p", "peer detail"}, {"/send-photo <path>", "attach photo via path"}, {"/send-voice <path>", "attach voice via path"}, {"/send-file <path>", "attach file via path"}, {"ctrl+u", "clear input"}, {"?", "toggle this help"}, {"esc", "close overlay"}}
+var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+n", "add contact"}, {"ctrl+o", "queue file attachment"}, {"ctrl+p", "peer detail"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "clear attachment or close overlay"}, {"?", "toggle this help"}}
 
 func (m *Model) renderHelpModal(_ string) string {
 	modalWidth := min(max(64, m.ui.width*2/3), max(40, m.ui.width-6))

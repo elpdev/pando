@@ -40,11 +40,7 @@ func (m *Model) View() string {
 
 func (m *Model) renderSidebar() string {
 	title := style.Bold.Render("Contacts")
-	shortcut := "up/down browse  enter open  ctrl+n add  tab switch pane"
-	if m.addContact.open {
-		shortcut = "add contact open  ctrl+s import  esc cancel"
-	}
-	lines := []string{title, style.Muted.Render(shortcut)}
+	lines := []string{title, style.Subtle.Render(fmt.Sprintf("%d chats", len(m.contacts)))}
 	if len(m.contacts) == 0 {
 		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+n."))
 	} else {
@@ -99,11 +95,18 @@ func (m *Model) renderSidebar() string {
 	if m.ui.width < narrowThreshold {
 		return lipgloss.NewStyle().Width(m.ui.sidebarWidth).Height(max(1, m.ui.height)).Render(content)
 	}
-	return style.SidebarBorder.Width(m.ui.sidebarWidth).Height(max(1, m.ui.height)).Render(content)
+	border := style.SidebarBorder
+	if m.ui.focus == focusSidebar {
+		border = style.SidebarBorderFocused
+	}
+	return border.Width(m.ui.sidebarWidth).Height(max(1, m.ui.height)).Render(content)
 }
 
 func (m *Model) renderConversation() string {
 	width := m.conversationWidth()
+	if m.filePicker.open {
+		return m.filePicker.View()
+	}
 	if m.peer.mailbox == "" {
 		hasDirectContacts := false
 		for _, contact := range m.contacts {
@@ -129,18 +132,15 @@ func (m *Model) renderConversation() string {
 				step("3.", "start typing", "pick them in the sidebar, then hit enter"),
 			}, "\n")
 			card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
-			return lipgloss.NewStyle().Width(width).Render(card + "\n\n" + m.input.View())
+			return lipgloss.NewStyle().Width(width).Render(card + "\n\n" + m.renderComposer(width))
 		}
 		lines := []string{
 			style.Bold.Render("No chat selected"),
 			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+n to import another."),
 			"",
-			m.input.View(),
+			m.renderComposer(width),
 		}
 		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
-	}
-	if m.filePicker.open {
-		return m.filePicker.View()
 	}
 	peerHeading := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
 	accentColor := style.PeerAccent(m.peer.fingerprint)
@@ -148,13 +148,13 @@ func (m *Model) renderConversation() string {
 		peerHeading = style.StatusInfo.Bold(true).Render(m.peer.label)
 		accentColor = style.RoomAccent
 	}
-	hint := style.Muted.Render("ctrl+o attach  |  ctrl+p peer detail  |  ? help")
+	hint := style.Subtle.Render(style.FormatFingerprintShort(m.peer.fingerprint))
 	if m.peer.isRoom {
-		hint = style.Muted.Render(fmt.Sprintf("encrypted room  |  %d/%d members  |  ? help", m.peer.memberCount, messaging.DefaultRoomCap))
+		hint = style.Subtle.Render(fmt.Sprintf("encrypted room  %d/%d members", m.peer.memberCount, messaging.DefaultRoomCap))
 	}
 	ruleWidth := min(max(8, lipgloss.Width(peerHeading)+6), max(1, width))
 	accentRule := lipgloss.NewStyle().Foreground(accentColor).Render(strings.Repeat("━", ruleWidth))
-	header := []string{
+	sections := []string{
 		peerHeading,
 		accentRule,
 		hint,
@@ -162,7 +162,44 @@ func (m *Model) renderConversation() string {
 		m.renderJumpPill(width),
 		m.renderToast(),
 		m.renderTypingIndicator(),
-		m.input.View(),
+		m.renderPendingAttachment(width),
+		m.renderComposer(width),
 	}
-	return lipgloss.NewStyle().Width(width).Render(strings.Join(header, "\n"))
+	return lipgloss.NewStyle().Width(width).Render(joinNonEmpty(sections...))
+}
+
+func (m *Model) renderPendingAttachment(width int) string {
+	if m.pending == nil {
+		return ""
+	}
+	kind := "file"
+	switch m.pending.kind {
+	case messaging.AttachmentTypePhoto:
+		kind = "photo"
+	case messaging.AttachmentTypeVoice:
+		kind = "voice"
+	}
+	label := fmt.Sprintf("%s %s", strings.ToUpper(kind), m.PendingAttachmentLabel())
+	clear := style.Muted.Render("esc clear")
+	pad := width - lipgloss.Width(label) - lipgloss.Width(clear) - 2
+	if pad < 1 {
+		pad = 1
+	}
+	line := style.StatusInfo.Bold(true).Render(label) + strings.Repeat(" ", pad) + clear
+	return style.InputBorder.Width(width).Padding(0, 1).Render(line)
+}
+
+func (m *Model) renderComposer(width int) string {
+	return style.InputBorder.Width(width).Padding(0, 1).Render(m.input.View())
+}
+
+func joinNonEmpty(parts ...string) string {
+	filtered := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if strings.TrimSpace(part) == "" {
+			continue
+		}
+		filtered = append(filtered, part)
+	}
+	return strings.Join(filtered, "\n")
 }

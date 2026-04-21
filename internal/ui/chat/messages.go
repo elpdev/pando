@@ -84,7 +84,7 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 			return
 		}
 		if m.peer.isRoom && m.peer.mailbox == result.RoomID {
-			m.appendMessageItem(messageItem{direction: "inbound", sender: result.PeerAccountID, body: result.Body, timestamp: envelope.Timestamp, messageID: result.MessageID})
+			m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "inbound", sender: result.PeerAccountID, body: result.Body, timestamp: envelope.Timestamp, messageID: result.MessageID})
 			m.syncViewport()
 			return
 		}
@@ -99,6 +99,7 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 	if result.PeerAccountID == m.peer.mailbox {
 		m.clearPeerTyping()
 		m.appendMessageItem(messageItem{
+			kind:         transcriptMessage,
 			direction:    "inbound",
 			sender:       envelope.SenderMailbox,
 			body:         result.Body,
@@ -125,6 +126,7 @@ func (m *Model) handleIncomingControl(result *messaging.IncomingResult) {
 		if result.RoomSync.Complete {
 			count := m.roomSync.syncedCount
 			m.clearRoomSync()
+			m.appendEventItem(time.Now().UTC(), fmt.Sprintf("room history synced: %d messages", count), "sync")
 			if count == 0 {
 				m.pushToast("no recent room history available", ToastInfo)
 			} else {
@@ -169,12 +171,23 @@ func (m *Model) handleIncomingError(msg *protocol.Error) {
 }
 
 func (m *Model) appendMessageItem(item messageItem) {
-	wasAtBottom := m.viewport.AtBottom()
+	item.kind = transcriptMessage
+	if !m.viewport.AtBottom() {
+		m.msgs.followLatest = false
+	}
 	m.msgs.items = append(m.msgs.items, item)
 	m.renderMessages()
-	if item.direction == "inbound" && !wasAtBottom {
+	if item.direction == "inbound" && !m.msgs.followLatest {
 		m.msgs.pendingIncoming++
 	}
+}
+
+func (m *Model) appendEventItem(ts time.Time, body, meta string) {
+	if body == "" {
+		return
+	}
+	m.msgs.items = append(m.msgs.items, messageItem{kind: transcriptEvent, body: body, timestamp: ts, meta: meta})
+	m.renderMessages()
 }
 
 func (m *Model) renderMessages() {
@@ -183,7 +196,22 @@ func (m *Model) renderMessages() {
 
 	var prevSender string
 	var prevTS time.Time
+	var prevDay string
 	for i, item := range m.msgs.items {
+		day := item.timestamp.Local().Format("2006-01-02")
+		if !item.timestamp.IsZero() && day != prevDay {
+			if len(m.msgs.rendered) > 0 {
+				m.msgs.rendered = append(m.msgs.rendered, "")
+			}
+			m.msgs.rendered = append(m.msgs.rendered, m.renderDaySeparator(item.timestamp))
+			prevDay = day
+		}
+		if item.kind == transcriptEvent {
+			m.msgs.rendered = append(m.msgs.rendered, m.renderEventBody(item))
+			prevSender = ""
+			prevTS = time.Time{}
+			continue
+		}
 		startGroup := i == 0 || item.sender != prevSender || item.timestamp.Sub(prevTS) > groupGap
 		if startGroup {
 			if i > 0 {
@@ -195,6 +223,28 @@ func (m *Model) renderMessages() {
 		prevSender = item.sender
 		prevTS = item.timestamp
 	}
+}
+
+func (m *Model) renderDaySeparator(ts time.Time) string {
+	label := style.Subtle.Render(ts.Local().Format("Mon Jan 2"))
+	left := strings.Repeat("─", 2)
+	return style.Faint.Render(left) + " " + label + " " + style.Faint.Render(left)
+}
+
+func (m *Model) renderEventBody(item messageItem) string {
+	meta := "event"
+	if item.meta != "" {
+		meta = item.meta
+	}
+	stamp := ""
+	if !item.timestamp.IsZero() {
+		stamp = item.timestamp.Local().Format(time.Kitchen)
+	}
+	prefix := style.Subtle.Render(strings.ToUpper(meta))
+	if stamp != "" {
+		prefix += style.Muted.Render(" " + style.GroupSep + " " + stamp)
+	}
+	return prefix + "\n  " + style.Muted.Render(item.body)
 }
 
 func (m *Model) renderGroupHeader(item messageItem) string {

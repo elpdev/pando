@@ -2,18 +2,21 @@ package chat
 
 import (
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
+	"github.com/elpdev/pando/internal/ui/style"
 )
 
 type Model struct {
@@ -29,11 +32,13 @@ type Model struct {
 	roomSync roomSyncState
 	ui       uiState
 
-	input    textinput.Model
+	input    textarea.Model
 	viewport viewport.Model
 
 	contacts      []contactItem
 	selectedIndex int
+	drafts        draftState
+	pending       *pendingAttachment
 
 	filePicker     filePickerModel
 	addContact     addContactModal
@@ -43,10 +48,24 @@ type Model struct {
 }
 
 func New(deps Deps) *Model {
-	input := textinput.New()
+	input := textarea.New()
 	input.Focus()
 	input.CharLimit = 4096
-	input.Prompt = "> "
+	input.ShowLineNumbers = false
+	input.Prompt = style.GlyphPrompt + " "
+	input.KeyMap.InsertNewline.SetKeys("shift+enter")
+	input.KeyMap.InsertNewline.SetHelp("shift+enter", "newline")
+	input.KeyMap.LinePrevious.SetKeys("ctrl+p")
+	input.KeyMap.LineNext.SetKeys("ctrl+n")
+	input.FocusedStyle.Base = style.InputFrame
+	input.FocusedStyle.CursorLine = lipgloss.NewStyle()
+	input.FocusedStyle.EndOfBuffer = lipgloss.NewStyle()
+	input.FocusedStyle.Placeholder = style.Muted
+	input.FocusedStyle.Prompt = style.StatusInfo
+	input.FocusedStyle.Text = lipgloss.NewStyle()
+	input.BlurredStyle = input.FocusedStyle
+	input.SetHeight(1)
+	input.SetWidth(20)
 
 	vp := viewport.New(0, 0)
 	vp.SetContent("")
@@ -69,6 +88,7 @@ func New(deps Deps) *Model {
 			status:     fmt.Sprintf("connecting as %s", deps.Mailbox),
 			connecting: true,
 		},
+		msgs:          messageState{followLatest: true},
 		typing:        typingState{spinner: newTypingSpinner()},
 		input:         input,
 		viewport:      vp,
@@ -84,6 +104,7 @@ func New(deps Deps) *Model {
 	m.loadContacts(deps.RecipientMailbox)
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
+	m.syncComposer()
 	m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
 	return m
 }
@@ -119,6 +140,8 @@ func (m *Model) SetSize(width, height int) {
 	m.ui.width = width
 	m.ui.height = height
 	m.updateLayout()
+	m.syncComposer()
+	m.updateLayout()
 	m.syncViewport()
 }
 
@@ -143,7 +166,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		m.pushToast(fmt.Sprintf("file picker failed: %v", msg.err), ToastBad)
 		return m, nil
 	case filePickerSelectedMsg:
-		return m, m.sendAttachment(msg.path, messaging.AttachmentTypeFile)
+		if err := m.setPendingAttachment(msg.path, messaging.AttachmentTypeFile); err != nil {
+			m.pushToast(fmt.Sprintf("attach failed: %v", err), ToastBad)
+		}
+		return m, nil
 	case clientEventMsg:
 		return m.handleClientEventMsg(msg)
 	case connectResultMsg:
@@ -160,9 +186,15 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleRoomHistorySyncResultMsg(msg)
 	}
 
+	if m.ui.focus != focusChat {
+		return m, nil
+	}
 	previousValue := m.input.Value()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.syncComposer()
+	m.updateLayout()
+	m.syncViewport()
 	typingCmd := m.handleInputActivity(previousValue, m.input.Value())
 	return m, tea.Batch(cmd, typingCmd)
 }
@@ -247,6 +279,47 @@ func (m *Model) Toast() (string, ToastLevel) {
 	return m.ui.toast.text, m.ui.toast.level
 }
 
+func (m *Model) Focus() focusState {
+	return m.ui.focus
+}
+
+func (m *Model) HasPendingAttachment() bool {
+	return m.pending != nil
+}
+
+func (m *Model) PendingAttachmentLabel() string {
+	if m.pending == nil {
+		return ""
+	}
+	label := m.pending.name
+	if label == "" {
+		label = m.pending.path
+	}
+	if m.pending.size > 0 {
+		label += " " + formatFileSize(m.pending.size)
+	}
+	return label
+}
+
+func (m *Model) PeerLabel() string {
+	if m.peer.isRoom && m.peer.label != "" {
+		return m.peer.label
+	}
+	if m.peer.mailbox != "" {
+		return m.peer.mailbox
+	}
+	return ""
+}
+
+func (m *Model) FooterSegments() []string {
+	segments := []string{m.connectionFooterSegment()}
+	if peer := m.peerFooterSegment(); peer != "" {
+		segments = append(segments, peer)
+	}
+	segments = append(segments, m.keyHintSegment())
+	return segments
+}
+
 // pushToast posts an ephemeral message to the toast slot. The message
 // persists for toastLifetime; after that the next typing tick clears it.
 func (m *Model) pushToast(text string, level ToastLevel) {
@@ -294,7 +367,10 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 			return true, nil
 		case filePickerSelectedMsg:
 			m.closeFilePicker()
-			return true, m.sendAttachment(next.path, messaging.AttachmentTypeFile)
+			if err := m.setPendingAttachment(next.path, messaging.AttachmentTypeFile); err != nil {
+				m.pushToast(fmt.Sprintf("attach failed: %v", err), ToastBad)
+			}
+			return true, nil
 		default:
 			return true, func() tea.Msg { return next }
 		}
@@ -404,6 +480,7 @@ func (m *Model) toggleFocus() {
 // jumpToLatest scrolls the viewport all the way down and clears the pending
 // incoming-message counter that feeds the "↓ N new" pill.
 func (m *Model) jumpToLatest() {
+	m.msgs.followLatest = true
 	m.viewport.GotoBottom()
 	m.msgs.pendingIncoming = 0
 }
@@ -468,22 +545,201 @@ func (m *Model) handleAttachmentCommand(prefix, body string, prepare func(string
 		m.pushToast(fmt.Sprintf("usage: %s <path>", prefix), ToastWarn)
 		return m, nil
 	}
-	batch, displayBody, err := prepare(m.peer.mailbox, path)
-	if err != nil {
+	if err := m.queuePendingAttachment(path, prefix); err != nil {
 		m.pushToast(err.Error(), ToastBad)
 		return m, nil
 	}
-	m.appendMessageItem(messageItem{
-		direction:    "outbound",
-		sender:       m.mailbox,
-		body:         displayBody,
-		timestamp:    time.Now().UTC(),
-		messageID:    batchMessageID(batch),
-		status:       statusPending,
-		isAttachment: true,
-	})
 	m.input.SetValue("")
-	m.resetLocalTypingState()
-	m.syncViewportToBottom()
-	return m, m.sendCmd(m.peer.mailbox, displayBody, batch)
+	m.syncComposer()
+	return m, nil
+}
+
+func (m *Model) syncComposer() {
+	width := m.conversationWidth()
+	if width <= 0 {
+		return
+	}
+	innerWidth := max(8, width-2)
+	m.input.SetWidth(innerWidth)
+	rows := composerRowsForValue(m.input.Value(), innerWidth-lipgloss.Width(m.input.Prompt))
+	m.ui.composerRows = rows
+	m.input.SetHeight(rows)
+}
+
+func composerRowsForValue(value string, width int) int {
+	if width <= 0 {
+		return 1
+	}
+	lines := strings.Split(value, "\n")
+	rows := 0
+	for _, line := range lines {
+		lineWidth := lipgloss.Width(line)
+		if lineWidth == 0 {
+			rows++
+			continue
+		}
+		rows += (lineWidth-1)/width + 1
+	}
+	if rows < 1 {
+		rows = 1
+	}
+	return min(6, rows)
+}
+
+func (m *Model) queuePendingAttachment(path, prefix string) error {
+	kind := messaging.AttachmentTypeFile
+	switch prefix {
+	case "/send-photo":
+		kind = messaging.AttachmentTypePhoto
+	case "/send-voice":
+		kind = messaging.AttachmentTypeVoice
+	}
+	return m.setPendingAttachment(path, kind)
+}
+
+func (m *Model) setPendingAttachment(path, kind string) error {
+	info, err := fileInfo(path)
+	if err != nil {
+		return err
+	}
+	m.pending = &pendingAttachment{
+		path: path,
+		kind: kind,
+		name: info.name,
+		size: info.size,
+	}
+	m.pushToast(fmt.Sprintf("queued %s", info.name), ToastInfo)
+	return nil
+}
+
+func (m *Model) clearPendingAttachment() {
+	m.pending = nil
+}
+
+func (m *Model) consumePendingAttachment() tea.Cmd {
+	if m.pending == nil {
+		return nil
+	}
+	pending := *m.pending
+	m.pending = nil
+	return m.sendAttachment(pending.path, pending.kind)
+}
+
+func (m *Model) rememberDraft(value string) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		m.drafts.index = -1
+		m.drafts.saved = ""
+		return
+	}
+	if n := len(m.drafts.history); n > 0 && m.drafts.history[n-1] == value {
+		m.drafts.index = -1
+		m.drafts.saved = ""
+		return
+	}
+	m.drafts.history = append(m.drafts.history, value)
+	if len(m.drafts.history) > 50 {
+		m.drafts.history = append([]string(nil), m.drafts.history[len(m.drafts.history)-50:]...)
+	}
+	m.drafts.index = -1
+	m.drafts.saved = ""
+}
+
+func (m *Model) browseDraftHistory(delta int) bool {
+	if len(m.drafts.history) == 0 {
+		return false
+	}
+	current := m.input.Value()
+	if delta < 0 {
+		if m.drafts.index == -1 {
+			m.drafts.saved = current
+			m.drafts.index = len(m.drafts.history) - 1
+		} else if m.drafts.index > 0 {
+			m.drafts.index--
+		} else {
+			return false
+		}
+	} else {
+		if m.drafts.index == -1 {
+			return false
+		}
+		if m.drafts.index < len(m.drafts.history)-1 {
+			m.drafts.index++
+		} else {
+			m.drafts.index = -1
+			m.input.SetValue(m.drafts.saved)
+			m.syncComposer()
+			return true
+		}
+	}
+	m.input.SetValue(m.drafts.history[m.drafts.index])
+	m.syncComposer()
+	return true
+}
+
+func (m *Model) connectionFooterSegment() string {
+	switch m.ConnectionState() {
+	case ConnConnected:
+		return style.StatusOk.Render(style.GlyphConnected) + " " + style.Muted.Render("connected")
+	case ConnConnecting:
+		return style.StatusWarn.Render(style.GlyphReconnecting) + " " + style.Muted.Render("connecting")
+	case ConnReconnecting:
+		txt := "reconnecting"
+		if delay := m.ReconnectDelay(); delay > 0 {
+			txt = fmt.Sprintf("reconnecting in %s", delay)
+		}
+		return style.StatusWarn.Render(style.GlyphReconnecting) + " " + style.Muted.Render(txt)
+	case ConnDisconnected:
+		return style.StatusBad.Render(style.GlyphOffline) + " " + style.Muted.Render("offline")
+	case ConnAuthFailed:
+		return style.StatusBad.Render(style.GlyphAuthFailed) + " " + style.Muted.Render("auth failed")
+	default:
+		return ""
+	}
+}
+
+func (m *Model) peerFooterSegment() string {
+	if m.peer.mailbox == "" {
+		return style.Muted.Render("no active chat")
+	}
+	if m.peer.isRoom {
+		joinState := "joined"
+		if !m.peer.joined {
+			joinState = "not joined"
+		}
+		return style.StatusInfo.Render(m.peer.label) + " " + style.Muted.Render(fmt.Sprintf("%s %d/%d", joinState, m.peer.memberCount, messaging.DefaultRoomCap))
+	}
+	verifyLabel := verificationLabel(m.peer.verified, m.peer.trustSource)
+	verifyStyle := style.UnverifiedWarn
+	if m.peer.verified {
+		verifyStyle = style.VerifiedOk
+	}
+	return style.PeerAccentStyle(m.peer.fingerprint).Render(m.peer.mailbox) + " " + verifyStyle.Render(verifyLabel)
+}
+
+func (m *Model) keyHintSegment() string {
+	if m.filePicker.open {
+		return style.Muted.Render("enter select  shift+enter newline  backspace up  esc close")
+	}
+	if m.ui.focus == focusSidebar {
+		return style.Muted.Render("up/down browse  enter open  tab chat  ctrl+n add  ? help")
+	}
+	hints := []string{"enter send", "shift+enter newline", "tab sidebar", "ctrl+o attach", "ctrl+p details", "? help"}
+	if m.pending != nil {
+		hints = append([]string{"esc clear attachment"}, hints...)
+	}
+	return style.Muted.Render(strings.Join(hints, "  "))
+}
+
+type pathInfo struct {
+	name string
+	size int64
+}
+
+func fileInfo(path string) (pathInfo, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return pathInfo{}, err
+	}
+	return pathInfo{name: info.Name(), size: info.Size()}, nil
 }

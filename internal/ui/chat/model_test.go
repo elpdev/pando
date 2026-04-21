@@ -617,8 +617,18 @@ func TestSendPhotoCommandQueuesAttachmentBatch(t *testing.T) {
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
+	if cmd != nil {
+		t.Fatal("expected attachment to queue without sending")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending photo attachment")
+	}
+	if !strings.Contains(model.PendingAttachmentLabel(), "photo.png") {
+		t.Fatalf("unexpected pending attachment label: %q", model.PendingAttachmentLabel())
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected send command")
+		t.Fatal("expected queued photo to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {
@@ -683,8 +693,15 @@ func TestSendPhotoCommandAcceptsQuotedPath(t *testing.T) {
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
+	if cmd != nil {
+		t.Fatal("expected attachment to queue without sending")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending photo attachment")
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected send command")
+		t.Fatal("expected queued photo to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {
@@ -739,8 +756,15 @@ func TestSendVoiceCommandQueuesAttachmentBatch(t *testing.T) {
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
+	if cmd != nil {
+		t.Fatal("expected attachment to queue without sending")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending voice attachment")
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected send command")
+		t.Fatal("expected queued voice to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {
@@ -805,8 +829,15 @@ func TestSendVoiceCommandAcceptsEscapedSpacesInPath(t *testing.T) {
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
+	if cmd != nil {
+		t.Fatal("expected attachment to queue without sending")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending voice attachment")
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected send command")
+		t.Fatal("expected queued voice to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {
@@ -861,8 +892,15 @@ func TestSendFileCommandQueuesAttachmentBatch(t *testing.T) {
 	if updated != model {
 		t.Fatal("expected model to update in place")
 	}
+	if cmd != nil {
+		t.Fatal("expected attachment to queue without sending")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending file attachment")
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
-		t.Fatal("expected send command")
+		t.Fatal("expected queued file to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {
@@ -943,11 +981,18 @@ func TestCtrlOOpensFilePickerAndSelectsFile(t *testing.T) {
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
 
 	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd == nil {
-		t.Fatal("expected send command from picker selection")
+	if cmd != nil {
+		t.Fatal("expected picker selection to queue attachment")
 	}
 	if model.filePicker.open {
 		t.Fatal("expected file picker to close after selecting a file")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected picker selection to create pending attachment")
+	}
+	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected queued picker attachment to send on enter")
 	}
 	msg := cmd()
 	if msg == nil {

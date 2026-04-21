@@ -44,10 +44,18 @@ type contactItem struct {
 	MemberCount int
 }
 
+type transcriptItemKind int
+
+const (
+	transcriptMessage transcriptItemKind = iota
+	transcriptEvent
+)
+
 // messageItem is one rendered chat message. We keep these as structured records
 // so the grouped renderer can reason about sender/time/delivery state without
 // having to parse strings.
 type messageItem struct {
+	kind         transcriptItemKind
 	direction    string // "outbound" | "inbound"
 	sender       string // mailbox that authored the message
 	body         string
@@ -55,6 +63,7 @@ type messageItem struct {
 	messageID    string
 	status       deliveryStatus
 	isAttachment bool
+	meta         string
 }
 
 // deliveryStatus is a four-state outbound lifecycle. Inbound messages ignore
@@ -144,3 +153,16 @@ const (
 	typingIdleTimeout       = 2 * time.Second
 	addContactLimit         = 16384
 )
+
+type draftState struct {
+	history []string
+	index   int
+	saved   string
+}
+
+type pendingAttachment struct {
+	path string
+	kind string
+	name string
+	size int64
+}

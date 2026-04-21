@@ -268,6 +268,7 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 		return nil
 	}
 	m.appendMessageItem(messageItem{
+		kind:         transcriptMessage,
 		direction:    "outbound",
 		sender:       m.mailbox,
 		body:         displayBody,
@@ -277,6 +278,7 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 		isAttachment: true,
 	})
 	m.input.SetValue("")
+	m.syncComposer()
 	m.resetLocalTypingState()
 	m.syncViewportToBottom()
 	return m.sendCmd(m.peer.mailbox, displayBody, batch)

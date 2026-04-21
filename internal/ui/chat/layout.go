@@ -12,12 +12,14 @@ func (m *Model) syncViewport() {
 	if m.viewport.Width <= 0 || m.viewport.Height <= 0 {
 		return
 	}
-	wasAtBottom := m.viewport.AtBottom()
+	offset := m.viewport.YOffset
 	m.viewport.SetContent(strings.Join(m.msgs.rendered, "\n"))
-	if wasAtBottom {
+	if m.msgs.followLatest {
 		m.viewport.GotoBottom()
 		m.msgs.pendingIncoming = 0
+		return
 	}
+	m.viewport.SetYOffset(offset)
 }
 
 func (m *Model) syncViewportToBottom() {
@@ -25,6 +27,7 @@ func (m *Model) syncViewportToBottom() {
 		return
 	}
 	m.viewport.SetContent(strings.Join(m.msgs.rendered, "\n"))
+	m.msgs.followLatest = true
 	m.viewport.GotoBottom()
 	m.msgs.pendingIncoming = 0
 }
@@ -53,10 +56,22 @@ func (m *Model) updateLayout() {
 	if m.ui.width <= 0 || m.ui.height <= 0 {
 		return
 	}
+	composerRows := max(1, m.ui.composerRows)
+	extraRows := 4 + composerRows
+	if m.ui.toast != nil {
+		extraRows++
+	}
+	if m.typing.peerVisible {
+		extraRows++
+	}
+	if m.pending != nil {
+		extraRows++
+	}
 	if m.ui.width < narrowThreshold {
 		m.ui.sidebarWidth = m.ui.width
 		m.viewport.Width = max(1, m.ui.width)
-		m.viewport.Height = max(1, m.ui.height-5)
+		m.viewport.Height = max(1, m.ui.height-extraRows)
+		m.syncComposer()
 		m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
 		return
 	}
@@ -70,7 +85,8 @@ func (m *Model) updateLayout() {
 	m.ui.sidebarWidth = sidebarWidth
 	conversationWidth := max(1, m.ui.width-m.ui.sidebarWidth-1)
 	m.viewport.Width = conversationWidth
-	m.viewport.Height = max(1, m.ui.height-5)
+	m.viewport.Height = max(1, m.ui.height-extraRows)
+	m.syncComposer()
 	m.filePicker.SetSize(conversationWidth, m.ui.height)
 }
 

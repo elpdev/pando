@@ -38,6 +38,7 @@ type messageState struct {
 	items           []messageItem
 	rendered        []string
 	pendingIncoming int
+	followLatest    bool
 }
 
 type typingState struct {
@@ -61,6 +62,7 @@ type uiState struct {
 	width        int
 	height       int
 	sidebarWidth int
+	composerRows int
 	focus        focusState
 	toast        *toastState
 }

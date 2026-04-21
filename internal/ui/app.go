@@ -34,7 +34,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.height = msg.Height
 		a.ready = true
 		a.lastInChat = a.chat.RecipientMailbox() != ""
-		a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
+		a.chat.SetSize(a.width-2, a.height-a.headerRows()-a.footerRows())
 		return a, nil
 	case tea.KeyMsg:
 		if msg.Type == tea.KeyCtrlC {
@@ -50,7 +50,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		inChat := a.chat.RecipientMailbox() != ""
 		if inChat != a.lastInChat {
 			a.lastInChat = inChat
-			a.chat.SetSize(a.width-2, a.height-a.headerRows()-1)
+			a.chat.SetSize(a.width-2, a.height-a.headerRows()-a.footerRows())
 		}
 	}
 	return a, cmd
@@ -60,7 +60,7 @@ func (a *App) View() string {
 	if !a.ready {
 		return "loading..."
 	}
-	return strings.Join([]string{a.renderHeader(), a.chat.View()}, "\n")
+	return strings.Join([]string{a.renderHeader(), a.chat.View(), a.renderFooter()}, "\n")
 }
 
 // Block-letter wordmark rendered in the branded banner. Each row is 20
@@ -72,38 +72,12 @@ var bannerLogo = [3]string{
 	"▀   ▀ ▀ ▀  ▀ ▀▀  ▀▀▀",
 }
 
-// bannerLetterSpans give the rune start/end (exclusive) of each PANDO
-// letter within a logo row, so we can render each letter in its own color.
-var bannerLetterSpans = [5][2]int{
-	{0, 3},   // P
-	{4, 7},   // A
-	{8, 12},  // N (4 runes wide)
-	{13, 16}, // D
-	{17, 20}, // O
-}
-
 const (
 	bannerLogoWidth = 20
 	bannerLeadSlash = 4
 	bannerMinWidth  = 48 // below this, collapse to the single-line meta row
 	bannerMinHeight = 20 // below this, give message history the real estate
 )
-
-func colorizeLogoRow(row string) string {
-	runes := []rune(row)
-	if len(runes) < bannerLogoWidth {
-		return style.StatusInfo.Bold(true).Render(row)
-	}
-	var b strings.Builder
-	for i, span := range bannerLetterSpans {
-		if i > 0 {
-			b.WriteRune(' ')
-		}
-		letterStyle := lipgloss.NewStyle().Foreground(style.BannerLetters[i]).Bold(true)
-		b.WriteString(letterStyle.Render(string(runes[span[0]:span[1]])))
-	}
-	return b.String()
-}
 
 // headerRows reports how many terminal rows the header occupies in the
 // current state. Four rows on the welcome screen (three for the wordmark
@@ -113,6 +87,10 @@ func (a *App) headerRows() int {
 	if a.showBanner() {
 		return 4
 	}
+	return 1
+}
+
+func (a *App) footerRows() int {
 	return 1
 }
 
@@ -136,12 +114,12 @@ func (a *App) renderHeader() string {
 	if !a.showBanner() {
 		return a.renderMetaLine()
 	}
-	lead := style.Faint.Render(strings.Repeat("╱", bannerLeadSlash))
+	lead := style.BannerSlash.Render(strings.Repeat("╱", bannerLeadSlash))
 	trailWidth := max(0, a.width-bannerLeadSlash-1-bannerLogoWidth-1)
-	trail := style.Faint.Render(strings.Repeat("╱", trailWidth))
+	trail := style.BannerSlash.Render(strings.Repeat("╱", trailWidth))
 	rows := make([]string, 0, 4)
 	for _, line := range bannerLogo {
-		rows = append(rows, lead+" "+colorizeLogoRow(line)+" "+trail)
+		rows = append(rows, lead+" "+style.BannerText.Render(line)+" "+trail)
 	}
 	meta := a.renderMetaLine()
 	if meta != "" {
@@ -154,6 +132,7 @@ func (a *App) renderHeader() string {
 // name (accent-colored), connection pill, and short fingerprint + verify
 // mark. Clipped to terminal width so the pill never wraps.
 func (a *App) renderMetaLine() string {
+	brand := style.Bold.Render("pando")
 	identity := style.Muted.Render(a.chat.Mailbox())
 
 	peerSeg := ""
@@ -174,12 +153,18 @@ func (a *App) renderMetaLine() string {
 		fpSeg = style.Muted.Render(style.FormatFingerprintShort(fp)) + " " + markStyle.Render(mark)
 	}
 
-	segs := []string{identity + peerSeg, pill}
+	segs := []string{brand + "  " + identity + peerSeg, pill}
 	if fpSeg != "" {
 		segs = append(segs, fpSeg)
 	}
 	row := strings.Join(segs, "    ")
 	return lipgloss.NewStyle().MaxWidth(a.width).Render(row)
+}
+
+func (a *App) renderFooter() string {
+	segments := a.chat.FooterSegments()
+	row := strings.Join(segments, "    ")
+	return style.Faint.Render(lipgloss.NewStyle().MaxWidth(a.width).Render(row))
 }
 
 func renderConnectionPill(state chat.ConnState, delay time.Duration, detail string) string {
