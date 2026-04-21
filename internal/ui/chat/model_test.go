@@ -200,8 +200,11 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if model.peer.mailbox != "" {
 		t.Fatalf("expected no active chat, got %q", model.peer.mailbox)
 	}
-	if model.selectedIndex != 0 {
-		t.Fatalf("expected first contact to be selected, got %d", model.selectedIndex)
+	if model.selectedIndex < 0 || model.selectedIndex >= len(model.contacts) {
+		t.Fatalf("expected a contact to be selected, got index %d of %d", model.selectedIndex, len(model.contacts))
+	}
+	if selected := model.contacts[model.selectedIndex]; selected.IsRoom || selected.Mailbox != "bob" {
+		t.Fatalf("expected bob (first direct contact) to be selected, got %+v", selected)
 	}
 	view := model.View()
 	if !strings.Contains(view, "bob  verified") {

@@ -19,15 +19,6 @@ func (m *Model) loadContacts(initialMailbox string) {
 		return
 	}
 	m.contacts = make([]contactItem, 0, len(contacts)+1)
-	for _, contact := range contacts {
-		m.contacts = append(m.contacts, contactItem{
-			Mailbox:     contact.AccountID,
-			Label:       contact.AccountID,
-			Fingerprint: contact.Fingerprint(),
-			Verified:    contact.Verified,
-			TrustSource: contact.TrustSource,
-		})
-	}
 	if room != nil {
 		m.contacts = append(m.contacts, contactItem{
 			Mailbox:     messaging.DefaultRoomID,
@@ -35,6 +26,15 @@ func (m *Model) loadContacts(initialMailbox string) {
 			IsRoom:      true,
 			Joined:      room.Joined,
 			MemberCount: len(room.Members),
+		})
+	}
+	for _, contact := range contacts {
+		m.contacts = append(m.contacts, contactItem{
+			Mailbox:     contact.AccountID,
+			Label:       contact.AccountID,
+			Fingerprint: contact.Fingerprint(),
+			Verified:    contact.Verified,
+			TrustSource: contact.TrustSource,
 		})
 	}
 	m.selectedIndex = -1
