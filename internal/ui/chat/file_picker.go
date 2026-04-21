@@ -132,8 +132,9 @@ func (m filePickerModel) View() string {
 		}
 	}
 	modalHeight := max(8, m.height-4)
-	modal := style.ModalBorder.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(m.width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal)
+	modal := style.Modal.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
+	return lipgloss.Place(m.width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(style.BackdropTint))
 }
 
 func (m *filePickerModel) openAt(dir string) error {

@@ -23,9 +23,10 @@ var (
 	colorSubtle  = lipgloss.Color("243") // tertiary text, meta
 	colorDim     = lipgloss.Color("248") // modal body text
 	colorBright  = lipgloss.Color("230") // modal titles
-	colorFaint   = lipgloss.Color("240") // dim borders, backdrop
-	colorBgSel   = lipgloss.Color("238") // selection background, sidebar border
-	colorBgModal = lipgloss.Color("235") // modal background
+	colorFaint   = lipgloss.Color("240") // dim borders
+	colorBgSel   = lipgloss.Color("238") // selection background, active-row highlight
+	colorBgModal = lipgloss.Color("234") // subtle modal inset + backdrop vignette
+	colorDivider = lipgloss.Color("60")  // sidebar divider accent
 
 	colorOk   = lipgloss.Color("86")  // green / connected / verified / delivered
 	colorWarn = lipgloss.Color("214") // amber / reconnecting / unverified
@@ -46,11 +47,14 @@ var (
 	Dim = lipgloss.NewStyle().Foreground(colorDim)
 	// Bright is the highest-contrast foreground for headings inside modals.
 	Bright = lipgloss.NewStyle().Foreground(colorBright)
-	// Faint is barely-visible text used for the dimmed backdrop behind modals.
+	// Faint is barely-visible text for thin dividers and placeholder borders.
 	Faint = lipgloss.NewStyle().Foreground(colorFaint)
 
 	Bold   = lipgloss.NewStyle().Bold(true)
 	Italic = lipgloss.NewStyle().Italic(true)
+
+	// ModalTitle is the bold bright heading at the top of every modal.
+	ModalTitle = Bright.Bold(true)
 )
 
 // ----------------------------------------------------------------------------
@@ -92,19 +96,29 @@ var (
 	Selected = lipgloss.NewStyle().Background(colorBgSel)
 	BgModal  = lipgloss.NewStyle().Background(colorBgModal)
 
+	// ActiveRow highlights the currently open chat row in the sidebar.
+	ActiveRow = lipgloss.NewStyle().Background(colorBgSel).Bold(true)
+
+	// BackdropTint is the raw color used to tint whitespace around modals via
+	// lipgloss.WithWhitespaceBackground.
+	BackdropTint = colorBgModal
+
+	// RoomAccent is the signature color for encrypted rooms (fingerprint-less).
+	RoomAccent = colorInfo
+
 	SidebarBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderRight(true).BorderLeft(false).BorderTop(false).BorderBottom(false).
-			BorderForeground(colorBgSel)
+			BorderForeground(colorDivider)
 
 	ModalBorder = lipgloss.NewStyle().
-			BorderStyle(lipgloss.RoundedBorder()).
+			BorderStyle(lipgloss.ThickBorder()).
 			BorderForeground(colorInfo)
 
 	// Modal combines the modal border and background. Downstream code should
 	// use this rather than composing them inline.
 	Modal = lipgloss.NewStyle().
-		BorderStyle(lipgloss.RoundedBorder()).
+		BorderStyle(lipgloss.ThickBorder()).
 		BorderForeground(colorInfo).
 		Background(colorBgModal)
 
@@ -132,9 +146,9 @@ const (
 	GlyphDeliveryDelivered = "✓✓"
 	GlyphDeliveryFailed    = "!"
 
-	GlyphCursorRow   = "▌" // sidebar: keyboard cursor marker
-	GlyphActiveChat  = "●" // sidebar: currently open chat marker
-	GlyphUnreadDot   = "●" // sidebar: unread-count bullet
+	GlyphCursorRow    = "▌" // sidebar: keyboard cursor marker
+	GlyphActiveChat   = "●" // sidebar: currently open chat marker
+	GlyphUnreadDot    = "●" // sidebar: unread-count bullet
 	GlyphJumpToLatest = "↓"
 
 	GroupSep = "·" // fingerprint group separator
