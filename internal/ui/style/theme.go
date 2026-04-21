@@ -1,6 +1,10 @@
 package style
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"os"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme is the single source of truth for every color the TUI renders. Each
 // named palette entry maps to one or more exported Style tokens; downstream
@@ -31,10 +35,23 @@ type Theme struct {
 }
 
 // Themes is the built-in registry. The active theme is always one of these;
-// downstream code selects by name via Apply.
+// downstream code selects by name via Apply. "phosphor" is the default;
+// "classic" preserves the original 256-color palette for anyone who prefers
+// it.
 var Themes = map[string]Theme{
-	"default": defaultTheme(),
+	"phosphor": phosphorTheme(),
+	"classic":  classicTheme(),
 }
+
+// DefaultThemeName is the theme applied when nothing else selects one. Kept
+// as an exported constant so downstream callers (config loaders, CLI) can
+// reference it without duplicating the string.
+const DefaultThemeName = "phosphor"
+
+// envThemeOverride is the env var callers can set to pick a theme at launch
+// before config-file selection is wired up. Unknown values fall back to the
+// default theme, silently — this is a convenience knob, not a strict API.
+const envThemeOverride = "PANDO_THEME"
 
 // active is the currently applied theme. Read-only for callers — swap via
 // Apply. Tests and the PeerAccent function consult it directly.
@@ -136,12 +153,13 @@ func Apply(t Theme) {
 	BannerSlash = lipgloss.NewStyle().Foreground(t.BannerSlash)
 }
 
-// defaultTheme is the stock 256-color palette that pando shipped with
+// classicTheme is the stock 256-color palette that pando shipped with
 // before the theming system landed. Matches the hard-coded values that
-// used to live in styles.go.
-func defaultTheme() Theme {
+// used to live in styles.go. Kept available under the "classic" key for
+// anyone who prefers the original look.
+func classicTheme() Theme {
 	return Theme{
-		Name: "default",
+		Name: "classic",
 
 		Faint:  lipgloss.Color("240"),
 		Muted:  lipgloss.Color("241"),
@@ -176,4 +194,52 @@ func defaultTheme() Theme {
 	}
 }
 
-func init() { Apply(Themes["default"]) }
+// phosphorTheme is a CRT-terminal palette inspired by classic amber-on-green
+// phosphor monitors. All values live on a cool navy base, with phosphor green
+// for primary text and warm amber as the accent. This is pando's default
+// theme; override to the pre-theming 256-color look with PANDO_THEME=classic.
+func phosphorTheme() Theme {
+	return Theme{
+		Name: "phosphor",
+
+		Faint:  lipgloss.Color("#3A5A44"), // phosphor-faint
+		Muted:  lipgloss.Color("#5A8A68"), // phosphor-dim
+		Subtle: lipgloss.Color("#788E80"), // mid phosphor-gray, synthesized
+		Dim:    lipgloss.Color("#8FBDA0"), // lighter mid-phosphor, synthesized
+		Bright: lipgloss.Color("#9FE8B0"), // phosphor
+
+		BgSel:     lipgloss.Color("#18233D"), // bg-3
+		BgModal:   lipgloss.Color("#111A2C"), // bg-2
+		BgPalette: lipgloss.Color("#18233D"), // bg-3
+		Divider:   lipgloss.Color("#2A3752"), // hairline
+
+		Ok:   lipgloss.Color("#4FAE7A"), // moss
+		Warn: lipgloss.Color("#FFB347"), // amber
+		Bad:  lipgloss.Color("#FF5E5B"), // signal
+		Info: lipgloss.Color("#6FD0E3"), // cyan
+
+		BannerText:  lipgloss.Color("#9FE8B0"), // phosphor
+		BannerSlash: lipgloss.Color("#FFB347"), // amber
+		RoomAccent:  lipgloss.Color("#6FD0E3"), // cyan
+
+		PeerAccents: []lipgloss.Color{
+			lipgloss.Color("#9FE8B0"), // phosphor
+			lipgloss.Color("#6FD0E3"), // cyan
+			lipgloss.Color("#FFB347"), // amber
+			lipgloss.Color("#4FAE7A"), // moss
+			lipgloss.Color("#5A8A68"), // phosphor-dim
+			lipgloss.Color("#A87324"), // amber-dim
+			lipgloss.Color("#BEE8C8"), // pale phosphor, synthesized
+			lipgloss.Color("#5ACFE3"), // teal cyan, synthesized
+		},
+	}
+}
+
+func init() {
+	name := os.Getenv(envThemeOverride)
+	theme, ok := Themes[name]
+	if !ok {
+		theme = Themes[DefaultThemeName]
+	}
+	Apply(theme)
+}
