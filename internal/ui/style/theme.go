@@ -45,6 +45,7 @@ type Theme struct {
 var Themes = map[string]Theme{
 	"phosphor": phosphorTheme(),
 	"classic":  classicTheme(),
+	"miami":    miamiTheme(),
 }
 
 // DefaultThemeName is the theme applied when nothing else selects one. Kept
@@ -240,6 +241,48 @@ func phosphorTheme() Theme {
 			lipgloss.Color("#A87324"), // amber-dim
 			lipgloss.Color("#BEE8C8"), // pale phosphor, synthesized
 			lipgloss.Color("#5ACFE3"), // teal cyan, synthesized
+		},
+	}
+}
+
+// miamiTheme is an 80s synthwave Miami-Vice palette — neon pink and electric
+// cyan on a deep twilight-indigo base, with sunset orange and electric purple
+// accents. Reach it with PANDO_THEME=miami.
+func miamiTheme() Theme {
+	return Theme{
+		Name: "miami",
+
+		Faint:  lipgloss.Color("#3D2852"), // deep plum
+		Muted:  lipgloss.Color("#7A5C9E"), // dusty lavender
+		Subtle: lipgloss.Color("#A888C9"), // pale lavender
+		Dim:    lipgloss.Color("#D4B8E8"), // soft pink-lavender
+		Bright: lipgloss.Color("#F0E6FF"), // near-white with violet cast
+
+		BgSel:     lipgloss.Color("#2A1448"), // indigo selection
+		BgModal:   lipgloss.Color("#1A0B2E"), // deep twilight
+		BgPalette: lipgloss.Color("#2A1448"), // matches BgSel
+		Divider:   lipgloss.Color("#3D2164"), // muted purple hairline
+
+		Ok:   lipgloss.Color("#00F5A0"), // neon mint
+		Warn: lipgloss.Color("#FF8C42"), // sunset orange
+		Bad:  lipgloss.Color("#FF3864"), // hot neon red
+		Info: lipgloss.Color("#00F0FF"), // electric cyan
+
+		BannerText:  lipgloss.Color("#FF2E88"), // hot pink
+		BannerSlash: lipgloss.Color("#00F0FF"), // electric cyan
+		RoomAccent:  lipgloss.Color("#B967FF"), // electric purple
+
+		PaletteAccent: lipgloss.Color("#FF2E88"), // hot pink — echoes banner
+
+		PeerAccents: []lipgloss.Color{
+			lipgloss.Color("#FF2E88"), // hot pink
+			lipgloss.Color("#00F0FF"), // electric cyan
+			lipgloss.Color("#B967FF"), // electric purple
+			lipgloss.Color("#FF8C42"), // sunset orange
+			lipgloss.Color("#00F5A0"), // neon mint
+			lipgloss.Color("#F92AAD"), // magenta
+			lipgloss.Color("#05D9E8"), // teal cyan
+			lipgloss.Color("#FFB3B3"), // soft peach
 		},
 	}
 }
