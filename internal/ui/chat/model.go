@@ -40,12 +40,14 @@ type Model struct {
 	drafts        draftState
 	pending       *pendingAttachment
 
-	filePicker     filePickerModel
-	commandPalette commandPaletteModel
-	addContact     addContactModal
-	helpOpen       bool
-	peerDetailOpen bool
-	unread         map[string]int
+	filePicker           filePickerModel
+	commandPalette       commandPaletteModel
+	addContact           addContactModal
+	contactRequests      contactRequestsModal
+	pendingRequestsCount int
+	helpOpen             bool
+	peerDetailOpen       bool
+	unread               map[string]int
 }
 
 func New(deps Deps) *Model {
@@ -109,7 +111,11 @@ func New(deps Deps) *Model {
 		ensureRelayClient: m.ensureRelayClient,
 		relayConfigured:   m.relayConfigured,
 	})
+	m.contactRequests = newContactRequestsModal(contactRequestsDeps{
+		decide: m.makeContactRequestDecision,
+	})
 	m.loadContacts(deps.RecipientMailbox)
+	m.loadContactRequests()
 	m.syncRecipientDetails()
 	m.syncInputPlaceholder()
 	m.syncComposer()
@@ -170,6 +176,10 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:
 		return m.handleAddContactClosedMsg(msg)
+	case contactRequestsClosedMsg:
+		return m.handleContactRequestsClosedMsg(msg)
+	case contactRequestDecisionResultMsg:
+		return m.handleContactRequestDecisionResult(msg)
 	case filePickerClosedMsg:
 		m.closeFilePicker()
 		return m, nil
@@ -354,6 +364,11 @@ func (m *Model) Close() error {
 }
 
 func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
+	if m.contactRequests.open {
+		if handled, cmd := m.contactRequests.Update(msg); handled {
+			return true, cmd
+		}
+	}
 	if m.addContact.open {
 		if handled, cmd := m.addContact.Update(msg); handled {
 			return true, cmd
@@ -494,7 +509,7 @@ func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) openCommandPalette() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "")
+	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount)
 	m.input.Blur()
 	return m.commandPalette.Open()
 }
@@ -503,6 +518,9 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 	switch action.command {
 	case commandPaletteCommandAddContact:
 		m.openAddContactModal()
+		return nil
+	case commandPaletteCommandContactRequests:
+		m.openContactRequestsModal()
 		return nil
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()

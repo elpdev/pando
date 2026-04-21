@@ -33,6 +33,9 @@ func (m *Model) View() string {
 	if m.addContact.open {
 		return m.clearInlineMedia(m.addContact.Overlay(view, m.ui.width, m.ui.height))
 	}
+	if m.contactRequests.open {
+		return m.clearInlineMedia(m.contactRequests.Overlay(m.ui.width, m.ui.height))
+	}
 	if m.commandPalette.open {
 		return m.clearInlineMedia(m.commandPalette.View(m.ui.width, m.ui.height, m.PeerLabel()))
 	}
@@ -45,6 +48,10 @@ func (m *Model) View() string {
 func (m *Model) renderSidebar() string {
 	title := style.Bold.Render("Contacts")
 	lines := []string{title, style.Subtle.Render(fmt.Sprintf("%d chats", len(m.contacts)))}
+	if m.pendingRequestsCount > 0 {
+		badge := style.UnreadBadge.Render(fmt.Sprintf("%s%d", style.GlyphUnreadDot, m.pendingRequestsCount))
+		lines = append(lines, fmt.Sprintf("%s  %s", style.Muted.Render("Requests"), badge))
+	}
 	if len(m.contacts) == 0 {
 		lines = append(lines, style.Muted.Render("No contacts. Press ctrl+p and choose Add contact."))
 	} else {

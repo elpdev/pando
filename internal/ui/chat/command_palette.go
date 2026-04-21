@@ -20,10 +20,11 @@ const (
 type commandPaletteCommand string
 
 const (
-	commandPaletteCommandAddContact commandPaletteCommand = "add-contact"
-	commandPaletteCommandAttachFile commandPaletteCommand = "attach-file"
-	commandPaletteCommandPeerDetail commandPaletteCommand = "peer-detail"
-	commandPaletteCommandThemes     commandPaletteCommand = "themes"
+	commandPaletteCommandAddContact      commandPaletteCommand = "add-contact"
+	commandPaletteCommandAttachFile      commandPaletteCommand = "attach-file"
+	commandPaletteCommandContactRequests commandPaletteCommand = "contact-requests"
+	commandPaletteCommandPeerDetail      commandPaletteCommand = "peer-detail"
+	commandPaletteCommandThemes          commandPaletteCommand = "themes"
 )
 
 type commandPaletteDeps struct {
@@ -51,12 +52,13 @@ type commandPaletteAction struct {
 }
 
 type commandPaletteModel struct {
-	deps     commandPaletteDeps
-	hasPeer  bool
-	open     bool
-	mode     commandPaletteMode
-	selected int
-	filter   textinput.Model
+	deps                 commandPaletteDeps
+	hasPeer              bool
+	pendingRequestsCount int
+	open                 bool
+	mode                 commandPaletteMode
+	selected             int
+	filter               textinput.Model
 }
 
 func newCommandPaletteModel(deps commandPaletteDeps) commandPaletteModel {
@@ -75,8 +77,9 @@ func (m *commandPaletteModel) Open() tea.Cmd {
 	return m.filter.Focus()
 }
 
-func (m *commandPaletteModel) SyncContext(hasPeer bool) {
+func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int) {
 	m.hasPeer = hasPeer
+	m.pendingRequestsCount = pendingRequestsCount
 }
 
 func (m *commandPaletteModel) Close() {
@@ -263,6 +266,13 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 			aliases: []string{"contact", "add", "invite"},
 		},
 		{
+			id:      string(commandPaletteCommandContactRequests),
+			title:   contactRequestsPaletteTitle(m.pendingRequestsCount),
+			detail:  "Review pending requests to connect, then accept or reject them.",
+			meta:    contactRequestsPaletteMeta(m.pendingRequestsCount),
+			aliases: []string{"contact", "requests", "inbox", "pending"},
+		},
+		{
 			id:      string(commandPaletteCommandAttachFile),
 			title:   "Attach file",
 			detail:  "Browse the local filesystem and queue one attachment for the active chat.",
@@ -320,4 +330,18 @@ func (m commandPaletteModel) currentThemeName() string {
 		return ""
 	}
 	return m.deps.currentTheme()
+}
+
+func contactRequestsPaletteTitle(count int) string {
+	if count <= 0 {
+		return "Contact requests"
+	}
+	return fmt.Sprintf("Contact requests (%d)", count)
+}
+
+func contactRequestsPaletteMeta(count int) string {
+	if count <= 0 {
+		return "INBOX"
+	}
+	return "PENDING"
 }

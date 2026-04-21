@@ -116,6 +116,10 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 }
 
 func (m *Model) handleIncomingControl(result *messaging.IncomingResult) {
+	if result.ContactRequest != nil {
+		m.handleContactRequestUpdate(result.ContactRequest)
+		return
+	}
 	if result.RoomSync != nil {
 		if m.roomSync.requestID != "" && result.RoomSync.RequestID != m.roomSync.requestID {
 			return
