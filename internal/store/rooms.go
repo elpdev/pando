@@ -28,6 +28,7 @@ type RoomMessageRecord struct {
 	SenderMailbox   string    `json:"sender_mailbox,omitempty"`
 	Body            string    `json:"body"`
 	Timestamp       time.Time `json:"timestamp"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
 }
 
 func (s *ClientStore) LoadRoomState(id *identity.Identity, roomID string) (*RoomState, error) {
@@ -76,7 +77,18 @@ func (s *ClientStore) LoadRoomHistory(id *identity.Identity, roomID string) ([]R
 		}
 		return nil, err
 	}
-	return records, nil
+	return filterExpiredRoomMessages(records, time.Now()), nil
+}
+
+func filterExpiredRoomMessages(records []RoomMessageRecord, now time.Time) []RoomMessageRecord {
+	kept := records[:0]
+	for _, record := range records {
+		if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now) {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	return kept
 }
 
 func (s *ClientStore) AppendRoomHistory(id *identity.Identity, roomID string, record RoomMessageRecord) error {

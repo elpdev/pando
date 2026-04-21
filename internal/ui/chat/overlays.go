@@ -2,6 +2,7 @@ package chat
 
 import (
 	"fmt"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/messaging"
@@ -128,6 +129,8 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return m.removeRelayProfile(action.relayName)
 	case commandPaletteCommandEditRelay:
 		return m.openEditRelayModal(action.relayName)
+	case commandPaletteCommandMessageTTL:
+		return m.applyPaletteMessageTTL(action.messageTTL)
 	default:
 		return nil
 	}
@@ -146,6 +149,21 @@ func (m *Model) applyPaletteTheme(name string) tea.Cmd {
 	}
 	if err := m.commandPalette.deps.saveTheme(name); err != nil {
 		m.pushToast(fmt.Sprintf("theme applied but not saved: %v", err), ToastWarn)
+	}
+	return nil
+}
+
+func (m *Model) applyPaletteMessageTTL(ttl time.Duration) tea.Cmd {
+	if ttl <= 0 {
+		return nil
+	}
+	m.messaging.SetMessageTTL(ttl)
+	m.pushToast(fmt.Sprintf("message TTL set to %s", formatMessageTTL(ttl)), ToastInfo)
+	if m.commandPalette.deps.saveMessageTTL == nil {
+		return nil
+	}
+	if err := m.commandPalette.deps.saveMessageTTL(ttl); err != nil {
+		m.pushToast(fmt.Sprintf("TTL applied but not saved: %v", err), ToastWarn)
 	}
 	return nil
 }

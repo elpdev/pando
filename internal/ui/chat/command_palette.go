@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -19,6 +20,7 @@ const (
 	commandPaletteModeRelays
 	commandPaletteModeRemoveRelay
 	commandPaletteModeEditRelay
+	commandPaletteModeMessageTTL
 )
 
 type commandPaletteCommand string
@@ -34,14 +36,27 @@ const (
 	commandPaletteCommandEditRelay       commandPaletteCommand = "edit-relay"
 	commandPaletteCommandSwitchRelay     commandPaletteCommand = "switch-relay"
 	commandPaletteCommandThemes          commandPaletteCommand = "themes"
+	commandPaletteCommandMessageTTL      commandPaletteCommand = "message-ttl"
 )
 
+// messageTTLOptions are the choices shown in the Message TTL sub-mode. The
+// maximum of 24h is enforced by offering no larger option; users editing
+// config.yml directly are further clamped by config.EffectiveMessageTTL.
+var messageTTLOptions = []time.Duration{
+	1 * time.Hour,
+	6 * time.Hour,
+	12 * time.Hour,
+	24 * time.Hour,
+}
+
 type commandPaletteDeps struct {
-	applyTheme       func(style.Theme)
-	currentTheme     func() string
-	saveTheme        func(name string) error
-	currentRelayName func() string
-	relayProfiles    func() []config.RelayProfile
+	applyTheme        func(style.Theme)
+	currentTheme      func() string
+	saveTheme         func(name string) error
+	currentRelayName  func() string
+	relayProfiles     func() []config.RelayProfile
+	currentMessageTTL func() time.Duration
+	saveMessageTTL    func(time.Duration) error
 }
 
 type commandPaletteItem struct {
@@ -58,9 +73,10 @@ type commandPaletteVisibleItem struct {
 }
 
 type commandPaletteAction struct {
-	command   commandPaletteCommand
-	themeName string
-	relayName string
+	command    commandPaletteCommand
+	themeName  string
+	relayName  string
+	messageTTL time.Duration
 }
 
 type commandPaletteModel struct {
@@ -103,7 +119,7 @@ func (m *commandPaletteModel) Close() {
 }
 
 func (m *commandPaletteModel) back() {
-	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeRelays || m.mode == commandPaletteModeRemoveRelay || m.mode == commandPaletteModeEditRelay {
+	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeRelays || m.mode == commandPaletteModeRemoveRelay || m.mode == commandPaletteModeEditRelay || m.mode == commandPaletteModeMessageTTL {
 		m.mode = commandPaletteModeRoot
 		m.selected = 0
 		m.filter.SetValue("")
@@ -180,6 +196,12 @@ func (m *commandPaletteModel) activate(item commandPaletteItem) (*commandPalette
 			m.filter.SetValue("")
 			return nil, nil
 		}
+		if item.id == string(commandPaletteCommandMessageTTL) {
+			m.mode = commandPaletteModeMessageTTL
+			m.selected = 0
+			m.filter.SetValue("")
+			return nil, nil
+		}
 		m.Close()
 		return &commandPaletteAction{command: commandPaletteCommand(item.id)}, nil
 	case commandPaletteModeThemes:
@@ -194,6 +216,13 @@ func (m *commandPaletteModel) activate(item commandPaletteItem) (*commandPalette
 	case commandPaletteModeEditRelay:
 		m.Close()
 		return &commandPaletteAction{command: commandPaletteCommandEditRelay, relayName: item.id}, nil
+	case commandPaletteModeMessageTTL:
+		ttl, err := time.ParseDuration(item.id)
+		if err != nil {
+			return nil, nil
+		}
+		m.Close()
+		return &commandPaletteAction{command: commandPaletteCommandMessageTTL, messageTTL: ttl}, nil
 	default:
 		return nil, nil
 	}
@@ -219,8 +248,11 @@ func (m commandPaletteModel) View(width, height int, peerLabel string) string {
 }
 
 func (m commandPaletteModel) title() string {
-	if m.mode == commandPaletteModeThemes {
+	switch m.mode {
+	case commandPaletteModeThemes:
 		return "Themes"
+	case commandPaletteModeMessageTTL:
+		return "Message TTL"
 	}
 	if m.mode == commandPaletteModeRelays {
 		return "Relays"
@@ -235,12 +267,15 @@ func (m commandPaletteModel) title() string {
 }
 
 func (m commandPaletteModel) subtitle(peerLabel string) string {
-	if m.mode == commandPaletteModeThemes {
+	switch m.mode {
+	case commandPaletteModeThemes:
 		current := m.currentThemeName()
 		if current == "" {
 			return "Choose a theme and apply it immediately."
 		}
 		return fmt.Sprintf("Choose a theme. Current: %s", current)
+	case commandPaletteModeMessageTTL:
+		return fmt.Sprintf("Messages self-destruct after this duration on both sides. Current: %s", formatMessageTTL(m.currentMessageTTLValue()))
 	}
 	if m.mode == commandPaletteModeRelays {
 		current := m.currentRelayName()
@@ -262,7 +297,7 @@ func (m commandPaletteModel) subtitle(peerLabel string) string {
 }
 
 func (m commandPaletteModel) footer() string {
-	if m.mode == commandPaletteModeThemes {
+	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeMessageTTL {
 		return "type filter · up/down browse · enter apply · esc back"
 	}
 	if m.mode == commandPaletteModeRelays {
@@ -336,6 +371,9 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 	if m.mode == commandPaletteModeEditRelay {
 		return m.relayItems(false)
 	}
+	if m.mode == commandPaletteModeMessageTTL {
+		return m.messageTTLItems()
+	}
 	items := []commandPaletteItem{
 		{
 			id:      string(commandPaletteCommandAddContact),
@@ -392,6 +430,13 @@ func (m commandPaletteModel) items(hasPeer bool) []commandPaletteItem {
 			detail:  "Switch the active terminal theme and save it to device config.",
 			meta:    "THEME",
 			aliases: []string{"theme", "themes", "appearance"},
+		},
+		{
+			id:      string(commandPaletteCommandMessageTTL),
+			title:   "Message TTL",
+			detail:  fmt.Sprintf("Set how long messages live before self-destructing. Current: %s.", formatMessageTTL(m.currentMessageTTLValue())),
+			meta:    "TTL",
+			aliases: []string{"ttl", "expire", "self-destruct", "destruct", "message"},
 		},
 	}
 	if hasPeer {
@@ -474,6 +519,49 @@ func (m commandPaletteModel) currentThemeName() string {
 		return ""
 	}
 	return m.deps.currentTheme()
+}
+
+func (m commandPaletteModel) currentMessageTTLValue() time.Duration {
+	if m.deps.currentMessageTTL == nil {
+		return 0
+	}
+	return m.deps.currentMessageTTL()
+}
+
+func (m commandPaletteModel) messageTTLItems() []commandPaletteItem {
+	current := m.currentMessageTTLValue()
+	items := make([]commandPaletteItem, 0, len(messageTTLOptions))
+	for _, option := range messageTTLOptions {
+		label := formatMessageTTL(option)
+		detail := "Self-destruct after " + label + "."
+		meta := ""
+		if option == current {
+			detail = "Current setting."
+			meta = "ACTIVE"
+		}
+		items = append(items, commandPaletteItem{
+			id:      option.String(),
+			title:   label,
+			detail:  detail,
+			meta:    meta,
+			aliases: []string{label, "ttl", "expire"},
+		})
+	}
+	return items
+}
+
+func formatMessageTTL(d time.Duration) string {
+	if d <= 0 {
+		return "default"
+	}
+	hours := int(d / time.Hour)
+	if hours > 0 && d%time.Hour == 0 {
+		if hours == 1 {
+			return "1 hour"
+		}
+		return fmt.Sprintf("%d hours", hours)
+	}
+	return d.String()
 }
 
 func contactRequestsPaletteTitle(count int) string {

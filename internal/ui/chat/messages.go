@@ -80,12 +80,12 @@ func (m *Model) handleIncomingAck() {
 
 func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope protocol.Envelope) {
 	if result.RoomID != "" {
-		if err := m.messaging.SaveDefaultRoomReceived(result.PeerAccountID, envelope.SenderMailbox, result.MessageID, result.Body, envelope.Timestamp); err != nil {
+		if err := m.messaging.SaveDefaultRoomReceived(result.PeerAccountID, envelope.SenderMailbox, result.MessageID, result.Body, envelope.Timestamp, result.ExpiresAt); err != nil {
 			m.pushToast(fmt.Sprintf("save room history failed: %v", err), ToastBad)
 			return
 		}
 		if m.peer.isRoom && m.peer.mailbox == result.RoomID {
-			m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "inbound", sender: result.PeerAccountID, body: result.Body, timestamp: envelope.Timestamp, messageID: result.MessageID})
+			m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "inbound", sender: result.PeerAccountID, body: result.Body, timestamp: envelope.Timestamp, messageID: result.MessageID, expiresAt: result.ExpiresAt})
 			m.syncViewport()
 			return
 		}
@@ -93,7 +93,7 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 		m.pushToast(fmt.Sprintf("new message in %s", messaging.DefaultRoomLabel()), ToastInfo)
 		return
 	}
-	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp, result.Attachment); err != nil {
+	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp, result.Attachment, result.ExpiresAt); err != nil {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return
 	}
@@ -107,6 +107,7 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 			timestamp:  envelope.Timestamp,
 			messageID:  result.MessageID,
 			attachment: result.Attachment,
+			expiresAt:  result.ExpiresAt,
 		})
 		m.syncViewport()
 		return
@@ -173,6 +174,42 @@ func (m *Model) handleIncomingError(msg *protocol.Error) {
 	if msg != nil {
 		m.pushToast(fmt.Sprintf("relay error: %s", msg.Message), ToastBad)
 	}
+}
+
+// outgoingItemExpiresAt computes the expiry to stamp on an outbound transcript
+// item sent at `now`, mirroring the messaging service's own stamping. Returns
+// zero when self-destruct is disabled.
+func (m *Model) outgoingItemExpiresAt(now time.Time) time.Time {
+	if m.messaging == nil {
+		return time.Time{}
+	}
+	ttl := m.messaging.MessageTTL()
+	if ttl <= 0 {
+		return time.Time{}
+	}
+	return now.Add(ttl)
+}
+
+// purgeExpiredTranscript removes transcript items whose expiresAt has passed.
+// Returns true when any item was dropped so the caller can re-render.
+func (m *Model) purgeExpiredTranscript(now time.Time) bool {
+	if len(m.msgs.items) == 0 {
+		return false
+	}
+	kept := m.msgs.items[:0]
+	removed := false
+	for _, item := range m.msgs.items {
+		if !item.expiresAt.IsZero() && !item.expiresAt.After(now) {
+			removed = true
+			continue
+		}
+		kept = append(kept, item)
+	}
+	if !removed {
+		return false
+	}
+	m.msgs.items = kept
+	return true
 }
 
 func (m *Model) appendMessageItem(item messageItem) {

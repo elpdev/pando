@@ -21,6 +21,7 @@ type Deps struct {
 	RelayClientFactory    func(url, token string) (RelayClient, error)
 	RelayTransportFactory func(url, token string) transport.Client
 	SaveTheme             func(name string) error
+	SaveMessageTTL        func(time.Duration) error
 	SaveRelays            func(relays []config.RelayProfile, active string) error
 }
 
@@ -72,6 +73,7 @@ type messageItem struct {
 	imageRendered string
 	imageWidth    int
 	meta          string
+	expiresAt     time.Time // zero means no expiry; purged from the live transcript once reached
 }
 
 // deliveryStatus is a four-state outbound lifecycle. Inbound messages ignore

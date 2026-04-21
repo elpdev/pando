@@ -73,7 +73,7 @@ func TestAuthFailureKeepsHistoryVisibleAndStopsReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new service: %v", err)
 	}
-	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC(), nil); err != nil {
+	if err := service.SaveReceived("bobn", "hello from history", time.Now().UTC(), nil, time.Time{}); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 
@@ -149,7 +149,7 @@ func TestLoadHistoryKeepsStructuredAttachmentMetadata(t *testing.T) {
 		t.Fatalf("write photo: %v", err)
 	}
 	attachment := messaging.NewAttachmentRecord(messaging.AttachmentTypePhoto, "photo.png", "image/png", photoPath, 42)
-	if err := service.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "photo.png", photoPath), time.Now().UTC(), attachment); err != nil {
+	if err := service.SaveReceived("bob", messaging.AttachmentReceivedBody(messaging.AttachmentTypePhoto, "photo.png", photoPath), time.Now().UTC(), attachment, time.Time{}); err != nil {
 		t.Fatalf("save photo history: %v", err)
 	}
 
@@ -286,7 +286,7 @@ func TestSidebarSelectionLoadsContactHistory(t *testing.T) {
 	if err := clientStore.SaveContact(carolContact); err != nil {
 		t.Fatalf("save carol contact: %v", err)
 	}
-	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC(), nil); err != nil {
+	if err := service.SaveReceived("bob", "hello from bob", time.Now().UTC(), nil, time.Time{}); err != nil {
 		t.Fatalf("save received history: %v", err)
 	}
 
@@ -1614,6 +1614,39 @@ func TestRenderMessagesGroupsByConsecutiveSender(t *testing.T) {
 	}
 	if !strings.Contains(joined, style.GlyphDeliveryDelivered) {
 		t.Fatalf("expected delivered glyph %q in output: %q", style.GlyphDeliveryDelivered, joined)
+	}
+}
+
+func TestTypingTickPurgesExpiredTranscriptItems(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+
+	now := time.Now().UTC()
+	model.msgs.items = []messageItem{
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "stale", timestamp: now.Add(-2 * time.Hour), messageID: "stale", expiresAt: now.Add(-time.Hour)},
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "fresh", timestamp: now.Add(-30 * time.Minute), messageID: "fresh", expiresAt: now.Add(30 * time.Minute)},
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "forever", timestamp: now.Add(-time.Hour), messageID: "forever"},
+	}
+
+	updated, _ := model.handleTypingTickMsg(typingTickMsg(now))
+	if len(updated.msgs.items) != 2 {
+		t.Fatalf("expected 2 items after purge, got %d: %+v", len(updated.msgs.items), updated.msgs.items)
+	}
+	for _, item := range updated.msgs.items {
+		if item.messageID == "stale" {
+			t.Fatalf("expired item was not purged: %+v", item)
+		}
 	}
 }
 

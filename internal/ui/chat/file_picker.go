@@ -310,15 +310,17 @@ func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
 		m.pushToast(err.Error(), ToastBad)
 		return nil
 	}
+	now := time.Now().UTC()
 	m.appendMessageItem(messageItem{
 		kind:       transcriptMessage,
 		direction:  "outbound",
 		sender:     m.mailbox,
 		body:       displayBody,
-		timestamp:  time.Now().UTC(),
+		timestamp:  now,
 		messageID:  batchMessageID(batch),
 		status:     statusPending,
 		attachment: batch.Attachment,
+		expiresAt:  m.outgoingItemExpiresAt(now),
 	})
 	m.input.SetValue("")
 	m.syncComposer()

@@ -40,6 +40,7 @@ type roomHistoryMessage struct {
 	SenderMailbox   string    `json:"sender_mailbox,omitempty"`
 	Body            string    `json:"body"`
 	Timestamp       time.Time `json:"timestamp"`
+	ExpiresAt       time.Time `json:"expires_at,omitempty"`
 }
 
 type roomHistoryChunk struct {

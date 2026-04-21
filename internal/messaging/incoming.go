@@ -40,6 +40,9 @@ func (s *Service) HandleIncoming(envelope protocol.Envelope) (*IncomingResult, e
 		return nil, err
 	}
 	if handled {
+		if result != nil && result.ExpiresAt.IsZero() {
+			result.ExpiresAt = envelope.ExpiresAt
+		}
 		return result, nil
 	}
 
@@ -107,6 +110,7 @@ func (s *Service) buildIncomingChatResult(contact *identity.Contact, envelope pr
 		Body:          body,
 		MessageID:     envelope.ClientMessageID,
 		AckEnvelopes:  ackEnvelopes,
+		ExpiresAt:     envelope.ExpiresAt,
 	}, nil
 }
 

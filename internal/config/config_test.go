@@ -98,6 +98,43 @@ func TestDeviceConfigLegacySingleRelayMigratesToProfile(t *testing.T) {
 	}
 }
 
+func TestEffectiveMessageTTL(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{name: "unset uses default", ttl: 0, want: DefaultMessageTTL},
+		{name: "negative uses default", ttl: -time.Hour, want: DefaultMessageTTL},
+		{name: "configured value is honored", ttl: time.Hour, want: time.Hour},
+		{name: "exactly max is honored", ttl: MaxMessageTTL, want: MaxMessageTTL},
+		{name: "above max is clamped", ttl: 48 * time.Hour, want: MaxMessageTTL},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DeviceConfig{MessageTTL: tt.ttl}
+			if got := cfg.EffectiveMessageTTL(); got != tt.want {
+				t.Fatalf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestDeviceConfigRoundTripIncludesMessageTTL(t *testing.T) {
+	rootDir := t.TempDir()
+	want := DeviceConfig{MessageTTL: 6 * time.Hour}
+	if err := SaveDeviceConfig(rootDir, want); err != nil {
+		t.Fatalf("save device config: %v", err)
+	}
+	got, err := LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	if got.MessageTTL != want.MessageTTL {
+		t.Fatalf("expected message TTL %s, got %s", want.MessageTTL, got.MessageTTL)
+	}
+}
+
 func TestRelayStorePathUsesCentralizedPandoRoot(t *testing.T) {
 	got := RelayStorePath(filepath.Join("/media", "flash-drive", "pando-data"))
 	want := filepath.Join("/media", "flash-drive", "pando-data", "relay", "relay.db")

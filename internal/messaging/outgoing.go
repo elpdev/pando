@@ -22,6 +22,7 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBat
 	if err != nil {
 		return nil, err
 	}
+	stampExpiresAt(chatEnvelopes, s.outgoingExpiresAt(time.Now().UTC()))
 	updateEnvelopes, err := s.contactUpdateEnvelopes(contact)
 	if err != nil {
 		return nil, err
@@ -31,6 +32,17 @@ func (s *Service) EncryptOutgoing(recipientAccountID, body string) (*OutgoingBat
 		messageID = chatEnvelopes[0].ClientMessageID
 	}
 	return &OutgoingBatch{MessageID: messageID, Envelopes: append(updateEnvelopes, chatEnvelopes...)}, nil
+}
+
+// stampExpiresAt sets the outer envelope expiry on every envelope in the slice.
+// No-op when expiresAt is the zero time (self-destruct disabled).
+func stampExpiresAt(envelopes []protocol.Envelope, expiresAt time.Time) {
+	if expiresAt.IsZero() {
+		return
+	}
+	for i := range envelopes {
+		envelopes[i].ExpiresAt = expiresAt
+	}
 }
 
 func (s *Service) TypingEnvelopes(recipientAccountID, state string) ([]protocol.Envelope, error) {

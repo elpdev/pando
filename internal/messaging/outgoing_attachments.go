@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/protocol"
@@ -60,6 +61,7 @@ func (s *Service) encryptAttachmentPayloads(contact *identity.Contact, payloads 
 	if err != nil {
 		return nil, err
 	}
+	expiresAt := s.outgoingExpiresAt(time.Now().UTC())
 	envelopes := make([]protocol.Envelope, 0, len(updateEnvelopes)+(len(payloads)*len(contact.ActiveDevices())))
 	envelopes = append(envelopes, updateEnvelopes...)
 	for _, payload := range payloads {
@@ -67,6 +69,7 @@ func (s *Service) encryptAttachmentPayloads(contact *identity.Contact, payloads 
 		if err != nil {
 			return nil, err
 		}
+		stampExpiresAt(chunkEnvelopes, expiresAt)
 		envelopes = append(envelopes, chunkEnvelopes...)
 	}
 	return envelopes, nil

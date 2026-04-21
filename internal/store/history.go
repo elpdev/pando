@@ -17,6 +17,7 @@ type MessageRecord struct {
 	Delivered   bool              `json:"delivered,omitempty"`
 	DeliveredAt time.Time         `json:"delivered_at,omitempty"`
 	Timestamp   time.Time         `json:"timestamp"`
+	ExpiresAt   time.Time         `json:"expires_at,omitempty"`
 }
 
 type AttachmentRecord struct {
@@ -39,7 +40,18 @@ func (s *ClientStore) LoadHistory(id *identity.Identity, peerMailbox string) ([]
 		}
 		return nil, err
 	}
-	return records, nil
+	return filterExpiredMessages(records, time.Now()), nil
+}
+
+func filterExpiredMessages(records []MessageRecord, now time.Time) []MessageRecord {
+	kept := records[:0]
+	for _, record := range records {
+		if !record.ExpiresAt.IsZero() && !record.ExpiresAt.After(now) {
+			continue
+		}
+		kept = append(kept, record)
+	}
+	return kept
 }
 
 func (s *ClientStore) AppendHistory(id *identity.Identity, record MessageRecord) error {

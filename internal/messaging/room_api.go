@@ -133,25 +133,29 @@ func (s *Service) EncryptDefaultRoomOutgoing(body string) (*OutgoingBatch, error
 	if err != nil {
 		return nil, err
 	}
+	stampExpiresAt(envelopes, s.outgoingExpiresAt(time.Now().UTC()))
 	return &OutgoingBatch{MessageID: messageID, Envelopes: envelopes}, nil
 }
 
 func (s *Service) SaveDefaultRoomSent(messageID, body string) error {
+	now := time.Now().UTC()
 	return s.store.AppendRoomHistory(s.identity, DefaultRoomID, store.RoomMessageRecord{
 		MessageID:       messageID,
 		SenderAccountID: s.identity.AccountID,
 		Body:            body,
-		Timestamp:       time.Now().UTC(),
+		Timestamp:       now,
+		ExpiresAt:       s.outgoingExpiresAt(now),
 	})
 }
 
-func (s *Service) SaveDefaultRoomReceived(senderAccountID, senderMailbox, messageID, body string, timestamp time.Time) error {
+func (s *Service) SaveDefaultRoomReceived(senderAccountID, senderMailbox, messageID, body string, timestamp, expiresAt time.Time) error {
 	return s.store.AppendRoomHistory(s.identity, DefaultRoomID, store.RoomMessageRecord{
 		MessageID:       messageID,
 		SenderAccountID: senderAccountID,
 		SenderMailbox:   senderMailbox,
 		Body:            body,
 		Timestamp:       timestamp,
+		ExpiresAt:       expiresAt,
 	})
 }
 

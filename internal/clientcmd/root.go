@@ -1,13 +1,17 @@
 package clientcmd
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"log"
 	"os"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/config"
+	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/passphrase"
 	"github.com/elpdev/pando/internal/relayapi"
@@ -17,6 +21,8 @@ import (
 	"github.com/elpdev/pando/internal/ui/chat"
 	"github.com/elpdev/pando/internal/ui/style"
 )
+
+const purgeExpiredInterval = 10 * time.Minute
 
 func Execute(args []string) error {
 	// Resolve root dir early so we can load the device config before setting flag defaults.
@@ -68,6 +74,7 @@ func Execute(args []string) error {
 	if err != nil {
 		return err
 	}
+	service.SetMessageTTL(devCfg.EffectiveMessageTTL())
 	if strings.TrimSpace(cfg.RelayURL) != "" {
 		directoryClient, err := relayapi.NewClient(cfg.RelayURL, cfg.RelayToken)
 		if err != nil {
@@ -92,6 +99,14 @@ func Execute(args []string) error {
 			devCfg.Theme = name
 			return config.SaveDeviceConfig(rootDir, devCfg)
 		},
+		SaveMessageTTL: func(ttl time.Duration) error {
+			devCfg, err := config.LoadDeviceConfig(rootDir)
+			if err != nil {
+				return err
+			}
+			devCfg.MessageTTL = ttl
+			return config.SaveDeviceConfig(rootDir, devCfg)
+		},
 		SaveRelays: func(relays []config.RelayProfile, active string) error {
 			devCfg, err := config.LoadDeviceConfig(rootDir)
 			if err != nil {
@@ -102,9 +117,37 @@ func Execute(args []string) error {
 		},
 	})
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startExpiredMessageSweeper(ctx, clientStore, service.Identity())
+
 	program := tea.NewProgram(ui.New(chatModel), tea.WithAltScreen())
 	_, err = program.Run()
 	return err
+}
+
+// startExpiredMessageSweeper runs PurgeExpired once immediately, then every
+// purgeExpiredInterval until ctx is cancelled. Errors are logged but never
+// surface to the UI — a failed sweep is not user-actionable.
+func startExpiredMessageSweeper(ctx context.Context, clientStore *store.ClientStore, id *identity.Identity) {
+	runSweep := func() {
+		if err := clientStore.PurgeExpired(id, time.Now().UTC()); err != nil {
+			log.Printf("purge expired messages: %v", err)
+		}
+	}
+	go func() {
+		runSweep()
+		ticker := time.NewTicker(purgeExpiredInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				runSweep()
+			}
+		}
+	}()
 }
 
 // scanRootDir scans args for an explicit -root-dir or --root-dir value.

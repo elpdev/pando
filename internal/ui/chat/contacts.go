@@ -148,6 +148,7 @@ func (m *Model) loadHistory() {
 				body:      record.Body,
 				timestamp: record.Timestamp,
 				messageID: record.MessageID,
+				expiresAt: record.ExpiresAt,
 			}
 			if record.SenderAccountID == m.messaging.Identity().AccountID {
 				item.direction = "outbound"
@@ -185,6 +186,7 @@ func (m *Model) loadHistory() {
 			timestamp:  record.Timestamp,
 			messageID:  record.MessageID,
 			attachment: attachment,
+			expiresAt:  record.ExpiresAt,
 		}
 		if record.Direction == "outbound" {
 			item.sender = m.mailbox

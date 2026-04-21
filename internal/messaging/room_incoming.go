@@ -203,12 +203,16 @@ func (s *Service) handleRoomHistoryChunk(contact *identity.Contact, payload *con
 		if !roomHasMember(state.Members, message.SenderAccountID) {
 			continue
 		}
+		if !message.ExpiresAt.IsZero() && !message.ExpiresAt.After(now) {
+			continue
+		}
 		records = append(records, store.RoomMessageRecord{
 			MessageID:       message.MessageID,
 			SenderAccountID: message.SenderAccountID,
 			SenderMailbox:   message.SenderMailbox,
 			Body:            message.Body,
 			Timestamp:       message.Timestamp,
+			ExpiresAt:       message.ExpiresAt,
 		})
 	}
 	added := 0

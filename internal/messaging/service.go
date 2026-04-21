@@ -1,6 +1,7 @@
 package messaging
 
 import (
+	"sync"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
@@ -42,6 +43,10 @@ type IncomingResult struct {
 	// TypingState and TypingExpiresAt are set only for typing control messages.
 	TypingState     string
 	TypingExpiresAt time.Time
+
+	// ExpiresAt, when non-zero, indicates when the incoming message should be
+	// purged from local storage. Copied from the envelope's outer ExpiresAt.
+	ExpiresAt time.Time
 }
 
 type ContactUpdateChange string
@@ -71,6 +76,9 @@ type Service struct {
 	identity            *identity.Identity
 	incomingAttachments *incomingAttachmentAssembler
 	directory           DirectoryClient
+
+	ttlMu      sync.RWMutex
+	messageTTL time.Duration
 }
 
 func New(store *store.ClientStore, mailbox string) (*Service, bool, error) {
@@ -116,6 +124,34 @@ func (s *Service) SetDirectoryClient(client DirectoryClient) {
 	s.directory = client
 }
 
+// SetMessageTTL updates the TTL stamped on outgoing messages. A non-positive
+// value disables self-destruct (outgoing messages carry no expiry).
+func (s *Service) SetMessageTTL(ttl time.Duration) {
+	s.ttlMu.Lock()
+	defer s.ttlMu.Unlock()
+	if ttl < 0 {
+		ttl = 0
+	}
+	s.messageTTL = ttl
+}
+
+// MessageTTL returns the current outgoing-message TTL. Zero means disabled.
+func (s *Service) MessageTTL() time.Duration {
+	s.ttlMu.RLock()
+	defer s.ttlMu.RUnlock()
+	return s.messageTTL
+}
+
+// outgoingExpiresAt returns the absolute expiry to stamp on an outgoing message
+// sent at `now`, or the zero time if self-destruct is disabled.
+func (s *Service) outgoingExpiresAt(now time.Time) time.Time {
+	ttl := s.MessageTTL()
+	if ttl <= 0 {
+		return time.Time{}
+	}
+	return now.Add(ttl)
+}
+
 func (s *Service) ContactRequests() ([]store.ContactRequest, error) {
 	return s.store.ListContactRequests()
 }
@@ -125,23 +161,26 @@ func (s *Service) History(peerMailbox string) ([]store.MessageRecord, error) {
 }
 
 func (s *Service) SaveSent(peerMailbox, messageID, body string, attachment *store.AttachmentRecord) error {
+	now := time.Now().UTC()
 	return s.store.AppendHistory(s.identity, store.MessageRecord{
 		MessageID:   messageID,
 		PeerMailbox: peerMailbox,
 		Direction:   "outbound",
 		Body:        body,
 		Attachment:  attachment,
-		Timestamp:   time.Now().UTC(),
+		Timestamp:   now,
+		ExpiresAt:   s.outgoingExpiresAt(now),
 	})
 }
 
-func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time, attachment *store.AttachmentRecord) error {
+func (s *Service) SaveReceived(peerMailbox, body string, timestamp time.Time, attachment *store.AttachmentRecord, expiresAt time.Time) error {
 	return s.store.AppendHistory(s.identity, store.MessageRecord{
 		PeerMailbox: peerMailbox,
 		Direction:   "inbound",
 		Body:        body,
 		Attachment:  attachment,
 		Timestamp:   timestamp,
+		ExpiresAt:   expiresAt,
 	})
 }
 

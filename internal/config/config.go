@@ -195,6 +195,25 @@ type DeviceConfig struct {
 	ActiveRelay    string         `yaml:"active_relay,omitempty"`
 	DefaultMailbox string         `yaml:"default_mailbox,omitempty"`
 	Theme          string         `yaml:"theme,omitempty"`
+	MessageTTL     time.Duration  `yaml:"message_ttl,omitempty"`
+}
+
+const (
+	DefaultMessageTTL = 24 * time.Hour
+	MaxMessageTTL     = 24 * time.Hour
+)
+
+// EffectiveMessageTTL returns the configured TTL clamped to (0, MaxMessageTTL].
+// An unset or non-positive value resolves to DefaultMessageTTL; values above
+// MaxMessageTTL are capped.
+func (c DeviceConfig) EffectiveMessageTTL() time.Duration {
+	if c.MessageTTL <= 0 {
+		return DefaultMessageTTL
+	}
+	if c.MessageTTL > MaxMessageTTL {
+		return MaxMessageTTL
+	}
+	return c.MessageTTL
 }
 
 func (c DeviceConfig) RelayProfiles() []RelayProfile {

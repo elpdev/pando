@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/ui/style"
@@ -31,7 +32,7 @@ func runConfig(args []string) error {
 
 func runConfigSet(args []string) error {
 	if len(args) == 0 {
-		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme> <value>")
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme|message-ttl> <value>")
 	}
 	switch args[0] {
 	case "relay":
@@ -42,8 +43,10 @@ func runConfigSet(args []string) error {
 		return runConfigSetMailbox(args[1:])
 	case "theme":
 		return runConfigSetTheme(args[1:])
+	case "message-ttl":
+		return runConfigSetMessageTTL(args[1:])
 	case "help":
-		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme> <value>")
+		return fmt.Errorf("usage: pando config set <relay|relay-token|mailbox|theme|message-ttl> <value>")
 	default:
 		return fmt.Errorf("unknown config set subcommand %q", args[0])
 	}
@@ -88,7 +91,15 @@ func runConfigShow(args []string) error {
 		theme = fmt.Sprintf("(default: %s)", style.DefaultThemeName)
 	}
 	fmt.Printf("theme: %s\n", theme)
+	fmt.Printf("message_ttl: %s (effective: %s)\n", formatTTLRaw(devCfg.MessageTTL), devCfg.EffectiveMessageTTL())
 	return nil
+}
+
+func formatTTLRaw(d time.Duration) string {
+	if d <= 0 {
+		return fmt.Sprintf("(default: %s)", config.DefaultMessageTTL)
+	}
+	return d.String()
 }
 
 func runConfigSetRelay(args []string) error {
@@ -206,6 +217,38 @@ func runConfigSetTheme(args []string) error {
 		return err
 	}
 	fmt.Printf("theme set to %s\n", devCfg.Theme)
+	return nil
+}
+
+func runConfigSetMessageTTL(args []string) error {
+	fs := flag.NewFlagSet("config set message-ttl", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	rootDir := fs.String("root-dir", config.DefaultRootDir(), "root directory for Pando storage")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: pando config set message-ttl <duration> (e.g. 1h, 6h, 24h; max %s)", config.MaxMessageTTL)
+	}
+	ttl, err := time.ParseDuration(fs.Arg(0))
+	if err != nil {
+		return fmt.Errorf("invalid duration %q: %w", fs.Arg(0), err)
+	}
+	if ttl <= 0 {
+		return fmt.Errorf("message-ttl must be positive")
+	}
+	if ttl > config.MaxMessageTTL {
+		return fmt.Errorf("message-ttl %s exceeds maximum %s", ttl, config.MaxMessageTTL)
+	}
+	devCfg, err := config.LoadDeviceConfig(*rootDir)
+	if err != nil {
+		return err
+	}
+	devCfg.MessageTTL = ttl
+	if err := config.SaveDeviceConfig(*rootDir, devCfg); err != nil {
+		return err
+	}
+	fmt.Printf("message_ttl set to %s\n", devCfg.MessageTTL)
 	return nil
 }
 
