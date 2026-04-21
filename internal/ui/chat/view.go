@@ -179,16 +179,19 @@ func (m *Model) renderPendingAttachment(width int) string {
 	}
 	label := fmt.Sprintf("%s %s", strings.ToUpper(kind), m.PendingAttachmentLabel())
 	clear := style.Muted.Render("esc clear")
-	pad := width - lipgloss.Width(label) - lipgloss.Width(clear) - 4
+	// InputBorder.Width(n) renders at n+2 cols (border chars sit outside Width),
+	// so subtract 2 to keep the final block within the outer conversation width.
+	inner := max(1, width-2)
+	pad := inner - lipgloss.Width(label) - lipgloss.Width(clear) - 2
 	if pad < 1 {
 		pad = 1
 	}
 	line := style.StatusInfo.Bold(true).Render(label) + strings.Repeat(" ", pad) + clear
-	return style.InputBorder.Width(width).Padding(0, 1).Render(line)
+	return style.InputBorder.Width(inner).Padding(0, 1).Render(line)
 }
 
 func (m *Model) renderComposer(width int) string {
-	return style.InputBorder.Width(width).Padding(0, 1).Render(m.input.View())
+	return style.InputBorder.Width(max(1, width-2)).Padding(0, 1).Render(m.input.View())
 }
 
 func joinNonEmpty(parts ...string) string {
