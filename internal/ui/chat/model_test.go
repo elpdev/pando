@@ -1881,7 +1881,7 @@ func TestManifestoCardShownWhenNoChatSelected(t *testing.T) {
 	if !strings.Contains(view, "the right to a private conversation is not a feature") {
 		t.Fatalf("expected manifesto quote in view: %q", view)
 	}
-	if !strings.Contains(view, "pando exists because your conversations are nobody's business but yours") {
+	if !strings.Contains(view, "conversations should belong only to the people having them") {
 		t.Fatalf("expected updated manifesto line in view: %q", view)
 	}
 	if !strings.Contains(view, "Pick a contact from the sidebar, or press ctrl+p to add one.") {
