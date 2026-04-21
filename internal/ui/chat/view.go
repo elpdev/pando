@@ -138,11 +138,22 @@ func (m *Model) renderConversation() string {
 			card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
 			return lipgloss.NewStyle().Width(width).Render(card)
 		}
-		lines := []string{
-			style.Bold.Render("No chat selected"),
-			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+p and choose Add contact."),
-		}
-		return lipgloss.NewStyle().Width(width).Render(strings.Join(lines, "\n"))
+		cardWidth := min(max(56, width-12), max(38, width-4))
+		title := style.ModalTitle.Render("Why this exists")
+		rule := style.Muted.Render(strings.Repeat("─", max(1, lipgloss.Width(title))))
+		body := strings.Join([]string{
+			title,
+			rule,
+			"",
+			style.Italic.Render("the right to a private conversation is not a feature."),
+			style.Italic.Render("it is a prerequisite for free thought."),
+			"",
+			style.Bold.Render("pando exists because your conversations are nobody's business but yours."),
+			"",
+			style.Muted.Render("Pick a contact from the sidebar, or press ctrl+p to add one."),
+		}, "\n")
+		card := style.Modal.Width(cardWidth).Padding(1, 2).Render(body)
+		return lipgloss.Place(width, max(1, m.ui.height), lipgloss.Center, lipgloss.Center, card)
 	}
 	peerHeading := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
 	accentColor := style.PeerAccent(m.peer.fingerprint)
