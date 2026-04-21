@@ -238,6 +238,78 @@ func TestDeliveryAckMarksSentHistoryDelivered(t *testing.T) {
 	}
 }
 
+func TestDefaultRoomRoundTrip(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	aliceRoom, aliceJoinBatch, err := aliceService.JoinDefaultRoom()
+	if err != nil {
+		t.Fatalf("alice join room: %v", err)
+	}
+	if aliceRoom == nil || !aliceRoom.Joined {
+		t.Fatalf("expected alice to join room: %+v", aliceRoom)
+	}
+	for i := range aliceJoinBatch.Envelopes {
+		aliceJoinBatch.Envelopes[i].ID = fmt.Sprintf("alice-join-%d", i)
+		if _, err := bobService.HandleIncoming(aliceJoinBatch.Envelopes[i]); err != nil {
+			t.Fatalf("bob handle alice membership: %v", err)
+		}
+	}
+	bobRoom, bobJoinBatch, err := bobService.JoinDefaultRoom()
+	if err != nil {
+		t.Fatalf("bob join room: %v", err)
+	}
+	if bobRoom == nil || !bobRoom.Joined {
+		t.Fatalf("expected bob to join room: %+v", bobRoom)
+	}
+	for i := range bobJoinBatch.Envelopes {
+		bobJoinBatch.Envelopes[i].ID = fmt.Sprintf("bob-join-%d", i)
+		if _, err := aliceService.HandleIncoming(bobJoinBatch.Envelopes[i]); err != nil {
+			t.Fatalf("alice handle bob membership: %v", err)
+		}
+	}
+
+	batch, err := aliceService.EncryptDefaultRoomOutgoing("hello room")
+	if err != nil {
+		t.Fatalf("encrypt default room outgoing: %v", err)
+	}
+	if batch == nil || batch.MessageID == "" || len(batch.Envelopes) == 0 {
+		t.Fatalf("expected room batch with encrypted envelopes: %+v", batch)
+	}
+	for i := range batch.Envelopes {
+		batch.Envelopes[i].ID = fmt.Sprintf("room-msg-%d", i)
+		result, err := bobService.HandleIncoming(batch.Envelopes[i])
+		if err != nil {
+			t.Fatalf("bob handle room message: %v", err)
+		}
+		if result == nil || result.RoomID != DefaultRoomID || result.Body != "hello room" {
+			t.Fatalf("unexpected room incoming result: %+v", result)
+		}
+	}
+}
+
 func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := New(aliceStore, "alice")

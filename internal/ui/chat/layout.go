@@ -38,6 +38,14 @@ func (m *Model) syncInputPlaceholder() {
 		m.input.Placeholder = "Select a contact to start chatting"
 		return
 	}
+	if m.peer.isRoom {
+		if !m.peer.joined {
+			m.input.Placeholder = "Press enter to join #general"
+			return
+		}
+		m.input.Placeholder = "Message #general"
+		return
+	}
 	m.input.Placeholder = fmt.Sprintf("Message %s", m.peer.mailbox)
 }
 

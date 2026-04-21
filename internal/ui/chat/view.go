@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/identity"
+	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -59,13 +60,25 @@ func (m *Model) renderSidebar() string {
 				activeGlyph = style.StatusOk.Render(style.GlyphActiveChat)
 			}
 			marker := cursorGlyph + activeGlyph
-			mailbox := contact.Mailbox
+			mailbox := contact.Label
 			if isActive {
-				mailbox = style.PeerAccentStyle(contact.Fingerprint).Bold(true).Render(mailbox)
+				if contact.IsRoom {
+					mailbox = style.StatusInfo.Bold(true).Render(mailbox)
+				} else {
+					mailbox = style.PeerAccentStyle(contact.Fingerprint).Bold(true).Render(mailbox)
+				}
 			}
 			badge := ""
 			if n := m.Unread(contact.Mailbox); n > 0 {
 				badge = " " + style.UnreadBadge.Render(fmt.Sprintf("%s%d", style.GlyphUnreadDot, n))
+			}
+			if contact.IsRoom {
+				status := style.Muted.Render("joined")
+				if !contact.Joined {
+					status = style.StatusWarn.Render("not joined")
+				}
+				lines = append(lines, fmt.Sprintf("%s %s%s  %s", marker, mailbox, badge, status))
+				continue
 			}
 			statusStyle := style.UnverifiedWarn
 			statusText := identity.TrustLabel(contact.TrustSource, contact.Verified)
@@ -88,7 +101,14 @@ func (m *Model) renderSidebar() string {
 func (m *Model) renderConversation() string {
 	width := m.conversationWidth()
 	if m.peer.mailbox == "" {
-		if len(m.contacts) == 0 {
+		hasDirectContacts := false
+		for _, contact := range m.contacts {
+			if !contact.IsRoom {
+				hasDirectContacts = true
+				break
+			}
+		}
+		if !hasDirectContacts {
 			cardWidth := min(max(40, width-4), max(30, width-2))
 			title := style.Bright.Bold(true).Render("Welcome to Pando")
 			rule := style.Muted.Render(strings.Repeat("─", max(1, lipgloss.Width(title))))
@@ -119,9 +139,16 @@ func (m *Model) renderConversation() string {
 		return m.filePicker.View()
 	}
 	peerHeading := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
+	if m.peer.isRoom {
+		peerHeading = style.StatusInfo.Bold(true).Render(m.peer.label)
+	}
+	hint := style.Muted.Render("ctrl+o attach  |  ctrl+p peer detail  |  ? help")
+	if m.peer.isRoom {
+		hint = style.Muted.Render(fmt.Sprintf("encrypted room  |  %d/%d members  |  ? help", m.peer.memberCount, messaging.DefaultRoomCap))
+	}
 	header := []string{
 		peerHeading,
-		style.Muted.Render("ctrl+o attach  |  ctrl+p peer detail  |  ? help"),
+		hint,
 		m.viewport.View(),
 		m.renderJumpPill(width),
 		m.renderToast(),

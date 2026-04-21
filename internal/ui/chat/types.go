@@ -35,9 +35,13 @@ type RelayClient interface {
 
 type contactItem struct {
 	Mailbox     string
+	Label       string
 	Fingerprint string
 	Verified    bool
 	TrustSource string
+	IsRoom      bool
+	Joined      bool
+	MemberCount int
 }
 
 // messageItem is one rendered chat message. We keep these as structured records
@@ -124,6 +128,7 @@ type filePickerSelectedMsg struct{ path string }
 
 type sendResultMsg struct {
 	recipient string
+	roomID    string
 	messageID string
 	body      string
 	err       error

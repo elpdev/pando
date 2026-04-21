@@ -10,6 +10,9 @@ import (
 )
 
 func (m *Model) renderPeerDetailModal(base string) string {
+	if m.peer.isRoom {
+		return base
+	}
 	modalWidth := min(max(56, m.ui.width*2/3), max(40, m.ui.width-6))
 	if modalWidth <= 0 || m.ui.height <= 0 {
 		return base

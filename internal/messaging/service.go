@@ -21,6 +21,7 @@ type IncomingResult struct {
 	Duplicate     bool
 	Control       bool
 	PeerAccountID string
+	RoomID        string
 
 	// Body and AckEnvelopes are set for chat messages. Control messages may set
 	// ContactUpdated, MessageID, or TypingState instead.
@@ -34,6 +35,7 @@ type IncomingResult struct {
 	ContactUpdated *identity.Contact
 	ContactChange  ContactUpdateChange
 	ContactRequest *store.ContactRequest
+	RoomUpdated    *store.RoomState
 
 	// TypingState and TypingExpiresAt are set only for typing control messages.
 	TypingState     string

@@ -78,6 +78,20 @@ func (m *Model) handleIncomingAck() {
 }
 
 func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope protocol.Envelope) {
+	if result.RoomID != "" {
+		if err := m.messaging.SaveDefaultRoomReceived(result.PeerAccountID, envelope.SenderMailbox, result.MessageID, result.Body, envelope.Timestamp); err != nil {
+			m.pushToast(fmt.Sprintf("save room history failed: %v", err), ToastBad)
+			return
+		}
+		if m.peer.isRoom && m.peer.mailbox == result.RoomID {
+			m.appendMessageItem(messageItem{direction: "inbound", sender: result.PeerAccountID, body: result.Body, timestamp: envelope.Timestamp, messageID: result.MessageID})
+			m.syncViewport()
+			return
+		}
+		m.markUnread(result.RoomID)
+		m.pushToast(fmt.Sprintf("new message in %s", messaging.DefaultRoomLabel()), ToastInfo)
+		return
+	}
 	if err := m.messaging.SaveReceived(result.PeerAccountID, result.Body, envelope.Timestamp); err != nil {
 		m.pushToast(fmt.Sprintf("save history failed: %v", err), ToastBad)
 		return
@@ -100,6 +114,13 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 }
 
 func (m *Model) handleIncomingControl(result *messaging.IncomingResult) {
+	if result.RoomUpdated != nil {
+		m.syncRoomContact(result.RoomUpdated)
+		if m.peer.isRoom && m.peer.mailbox == result.RoomUpdated.ID {
+			m.loadHistory()
+		}
+		return
+	}
 	if result.TypingState != "" {
 		if result.PeerAccountID != m.peer.mailbox {
 			return
@@ -163,7 +184,11 @@ func (m *Model) renderGroupHeader(item messageItem) string {
 	if item.direction == "outbound" {
 		nameStyled = style.Bold.Render("you")
 	} else {
-		nameStyled = style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(name)
+		if m.peer.isRoom {
+			nameStyled = style.Bright.Render(name)
+		} else {
+			nameStyled = style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(name)
+		}
 	}
 	ts := ""
 	if !item.timestamp.IsZero() {

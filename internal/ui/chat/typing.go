@@ -25,7 +25,7 @@ func (m *Model) typingTickCmd() tea.Cmd {
 }
 
 func (m *Model) sendTypingCmd(recipient, state string) tea.Cmd {
-	if recipient == "" || m.guardCanSend() != nil {
+	if recipient == "" || m.peer.isRoom || m.guardCanSend() != nil {
 		return nil
 	}
 	return func() tea.Msg {

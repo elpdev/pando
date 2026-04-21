@@ -41,6 +41,10 @@ func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *cont
 		return s.handleTyping(contact, payload)
 	case contentKindAttachmentChunk:
 		return s.handleAttachmentChunk(contact, payload)
+	case contentKindRoomMessage:
+		return s.handleRoomMessage(contact, payload)
+	case contentKindRoomMembership:
+		return s.handleRoomMembership(contact, payload)
 	default:
 		return nil, nil
 	}

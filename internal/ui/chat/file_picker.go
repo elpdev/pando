@@ -242,6 +242,10 @@ func (m *Model) closeFilePicker() {
 }
 
 func (m *Model) sendAttachment(path, attachmentType string) tea.Cmd {
+	if m.peer.isRoom {
+		m.pushToast("attachments are not supported in #general yet", ToastWarn)
+		return nil
+	}
 	var (
 		batch       *messaging.OutgoingBatch
 		displayBody string

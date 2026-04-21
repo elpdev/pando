@@ -12,6 +12,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
+	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport"
 )
 
@@ -315,6 +316,20 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 	}
 }
 
+func (m *Model) sendRoomCmd(roomID, body string, batch *messaging.OutgoingBatch) tea.Cmd {
+	return func() tea.Msg {
+		if batch == nil {
+			return sendResultMsg{roomID: roomID, body: body}
+		}
+		for _, envelope := range batch.Envelopes {
+			if err := m.client.Send(envelope); err != nil {
+				return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body, err: err}
+			}
+		}
+		return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body}
+	}
+}
+
 // handleHelpKey closes the help overlay on ?, esc, q, or ctrl+c. Every other
 // key is absorbed so the chat input doesn't receive keystrokes meant to
 // dismiss the overlay.
@@ -368,11 +383,33 @@ func (m *Model) upsertContact(contact *identity.Contact) {
 		m.contacts[idx].Fingerprint = contact.Fingerprint()
 		m.contacts[idx].Verified = contact.Verified
 		m.contacts[idx].TrustSource = contact.TrustSource
+		m.contacts[idx].Label = contact.AccountID
 		return
 	}
-	m.contacts = append(m.contacts, contactItem{Mailbox: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, TrustSource: contact.TrustSource})
+	m.contacts = append(m.contacts, contactItem{Mailbox: contact.AccountID, Label: contact.AccountID, Fingerprint: contact.Fingerprint(), Verified: contact.Verified, TrustSource: contact.TrustSource})
 	if m.selectedIndex == -1 {
 		m.selectedIndex = len(m.contacts) - 1
+	}
+}
+
+func (m *Model) syncRoomContact(state *store.RoomState) {
+	if state == nil {
+		return
+	}
+	for idx := range m.contacts {
+		if !m.contacts[idx].IsRoom {
+			continue
+		}
+		m.contacts[idx].Joined = state.Joined
+		m.contacts[idx].MemberCount = len(state.Members)
+		m.contacts[idx].Label = messaging.DefaultRoomLabel()
+		if m.peer.isRoom && m.peer.mailbox == state.ID {
+			m.peer.label = messaging.DefaultRoomLabel()
+			m.peer.joined = state.Joined
+			m.peer.memberCount = len(state.Members)
+			m.syncInputPlaceholder()
+		}
+		return
 	}
 }
 

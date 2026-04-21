@@ -22,6 +22,8 @@ const (
 	contentKindContactRequest  = "contact-request"
 	contentKindContactResponse = "contact-request-response"
 	contentKindTyping          = "typing"
+	contentKindRoomMessage     = "room-message"
+	contentKindRoomMembership  = "room-membership"
 	TypingStateActive          = "active"
 	TypingStateIdle            = "idle"
 	AttachmentTypePhoto        = "photo"
@@ -47,6 +49,24 @@ type contactRequestResponse struct {
 	Bundle   *identity.InviteBundle `json:"bundle,omitempty"`
 }
 
+type roomMessage struct {
+	RoomID          string `json:"room_id"`
+	MessageID       string `json:"message_id"`
+	SenderAccountID string `json:"sender_account_id"`
+	Body            string `json:"body"`
+}
+
+type roomMember struct {
+	AccountID string    `json:"account_id"`
+	JoinedAt  time.Time `json:"joined_at"`
+}
+
+type roomMembership struct {
+	RoomID    string       `json:"room_id"`
+	UpdatedAt time.Time    `json:"updated_at,omitempty"`
+	Members   []roomMember `json:"members,omitempty"`
+}
+
 type contentPayload struct {
 	Kind            string                  `json:"kind"`
 	Text            string                  `json:"text,omitempty"`
@@ -56,6 +76,8 @@ type contentPayload struct {
 	ContactRequest  *contactRequest         `json:"contact_request,omitempty"`
 	ContactResponse *contactRequestResponse `json:"contact_response,omitempty"`
 	Typing          *typingIndicator        `json:"typing,omitempty"`
+	RoomMessage     *roomMessage            `json:"room_message,omitempty"`
+	RoomMembership  *roomMembership         `json:"room_membership,omitempty"`
 }
 
 type typingIndicator struct {

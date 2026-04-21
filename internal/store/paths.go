@@ -14,6 +14,14 @@ func sanitizeStoreAttachmentID(value string) (string, error) {
 	return sanitizeStoreIdentifier(value, "attachment id")
 }
 
+func sanitizeStoreRoomID(value string) (string, error) {
+	return sanitizeStoreIdentifier(value, "room id")
+}
+
+func joinStorePath(base, name string) string {
+	return filepath.Join(base, name)
+}
+
 func sanitizeStoreIdentifier(value, label string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" || trimmed == "." || trimmed == ".." {

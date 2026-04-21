@@ -87,7 +87,7 @@ func (s *Service) handleIncomingUnknownSender(envelope protocol.Envelope) (*Inco
 	if err != nil {
 		return nil, err
 	}
-	if !ok || (payload.Kind != contentKindContactRequest && payload.Kind != contentKindContactResponse) {
+	if !ok || (payload.Kind != contentKindContactRequest && payload.Kind != contentKindContactResponse && payload.Kind != contentKindRoomMembership) {
 		return nil, fmt.Errorf("no contact device for sender mailbox %q", envelope.SenderMailbox)
 	}
 	result, err := s.handleIncomingPayload(contact, payload)

@@ -15,9 +15,13 @@ type relayState struct {
 
 type peerState struct {
 	mailbox     string
+	label       string
 	fingerprint string
 	verified    bool
 	trustSource string
+	isRoom      bool
+	joined      bool
+	memberCount int
 }
 
 type connectionState struct {

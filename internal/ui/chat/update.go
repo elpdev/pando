@@ -56,6 +56,8 @@ func (m *Model) guardCanSend() error {
 		return fmt.Errorf("cannot send: relay auth failed; restart with --relay-token")
 	case m.peer.mailbox == "":
 		return fmt.Errorf("select a contact from the sidebar first")
+	case m.peer.isRoom && !m.peer.joined:
+		return fmt.Errorf("join %s first", m.peer.label)
 	case !m.conn.connected:
 		return fmt.Errorf("relay is not connected; waiting to reconnect")
 	default:
@@ -85,6 +87,17 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 		if !m.activateSelectedContact() {
 			return m, nil
 		}
+		if m.peer.isRoom && !m.peer.joined {
+			state, batch, err := m.messaging.JoinDefaultRoom()
+			if err != nil {
+				m.pushToast(err.Error(), ToastBad)
+				return m, nil
+			}
+			m.syncRoomContact(state)
+			m.loadHistory()
+			m.pushToast(fmt.Sprintf("joined %s", messaging.DefaultRoomLabel()), ToastInfo)
+			return m, m.sendRoomCmd(m.peer.mailbox, "", batch)
+		}
 		return m, m.stopTypingCmd(previousRecipient)
 	}
 	if err := m.guardCanSend(); err != nil {
@@ -103,6 +116,18 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	}
 	if strings.HasPrefix(body, "/send-file") {
 		return m.handleAttachmentCommand("/send-file", body, m.messaging.PrepareFileOutgoing)
+	}
+	if m.peer.isRoom {
+		batch, err := m.messaging.EncryptDefaultRoomOutgoing(body)
+		if err != nil {
+			m.pushToast(err.Error(), ToastBad)
+			return m, nil
+		}
+		m.appendMessageItem(messageItem{direction: "outbound", sender: m.messaging.Identity().AccountID, body: body, timestamp: time.Now().UTC(), messageID: batchMessageID(batch), status: statusPending})
+		m.input.SetValue("")
+		m.resetLocalTypingState()
+		m.syncViewportToBottom()
+		return m, m.sendRoomCmd(m.peer.mailbox, body, batch)
 	}
 	batch, err := m.messaging.EncryptOutgoing(m.peer.mailbox, body)
 	if err != nil {
@@ -167,6 +192,21 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 		m.updateMessageStatus(msg.messageID, statusFailed)
 		m.syncViewport()
 		m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
+		return m, nil
+	}
+	if msg.roomID != "" {
+		if msg.body != "" {
+			if err := m.messaging.SaveDefaultRoomSent(msg.messageID, msg.body); err != nil {
+				m.pushToast(fmt.Sprintf("save room history failed: %v", err), ToastBad)
+				return m, nil
+			}
+		}
+		if msg.roomID == m.peer.mailbox {
+			if msg.messageID != "" && !m.updateMessageStatus(msg.messageID, statusSent) {
+				m.loadHistory()
+			}
+			m.syncViewport()
+		}
 		return m, nil
 	}
 	if err := m.messaging.SaveSent(msg.recipient, msg.messageID, msg.body); err != nil {
