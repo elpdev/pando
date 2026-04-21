@@ -105,6 +105,10 @@ func (s *Service) Contact(mailbox string) (*identity.Contact, error) {
 	return s.store.LoadContact(mailbox)
 }
 
+func (s *Service) MarkContactVerified(mailbox string, verified bool) (*identity.Contact, error) {
+	return s.store.MarkContactVerified(mailbox, verified)
+}
+
 func (s *Service) Contacts() ([]identity.Contact, error) {
 	return s.store.ListContacts()
 }

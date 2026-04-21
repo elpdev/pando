@@ -2,23 +2,17 @@ package ctlcmd
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
-	"github.com/elpdev/pando/internal/protocol"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
-	"github.com/gorilla/websocket"
 )
-
-const relayAuthHeader = "X-Pando-Relay-Token"
 
 func runDiscoverContacts(args []string) error {
 	bfs := NewBaseFlagSet("contact discover")
@@ -107,7 +101,7 @@ func runRequestContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishRelayEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
+	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
 		return err
 	}
 	if err := service.SaveContactRequest(request); err != nil {
@@ -212,7 +206,7 @@ func runResolveContactRequest(name string, args []string, decision string) error
 	if err != nil {
 		return err
 	}
-	if err := publishRelayEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
+	if err := relayapi.PublishEnvelopes(context.Background(), resolvedRelayURL, resolvedRelayToken, envelopes); err != nil {
 		return err
 	}
 	request.UpdatedAt = time.Now().UTC()
@@ -234,37 +228,5 @@ func runResolveContactRequest(name string, args []string, decision string) error
 		return err
 	}
 	fmt.Printf("rejected contact request from %s\n", request.AccountID)
-	return nil
-}
-
-func publishRelayEnvelopes(ctx context.Context, relayURL, relayToken string, envelopes []protocol.Envelope) error {
-	headers := http.Header{}
-	if relayToken != "" {
-		headers.Set(relayAuthHeader, relayToken)
-	}
-	conn, _, err := websocket.DefaultDialer.DialContext(ctx, relayURL, headers)
-	if err != nil {
-		return err
-	}
-	defer conn.Close()
-	var challenge protocol.Message
-	if err := conn.ReadJSON(&challenge); err != nil {
-		return fmt.Errorf("read subscribe challenge: %w", err)
-	}
-	for _, envelope := range envelopes {
-		if err := conn.WriteJSON(protocol.Message{Type: protocol.MessageTypePublish, Publish: &protocol.PublishRequest{Envelope: envelope}}); err != nil {
-			return fmt.Errorf("write publish request: %w", err)
-		}
-		var response protocol.Message
-		if err := conn.ReadJSON(&response); err != nil {
-			return fmt.Errorf("read publish ack: %w", err)
-		}
-		if response.Type == protocol.MessageTypeError && response.Error != nil {
-			return errors.New(response.Error.Message)
-		}
-		if response.Type != protocol.MessageTypeAck || response.Ack == nil {
-			return fmt.Errorf("expected publish ack, got %q", response.Type)
-		}
-	}
 	return nil
 }

@@ -42,6 +42,8 @@ type Model struct {
 	commandPalette       commandPaletteModel
 	addContact           addContactModal
 	addRelay             addRelayModal
+	contactRequestSend   contactRequestSendModal
+	contactVerify        contactVerifyModal
 	contactRequests      contactRequestsModal
 	pendingRequestsCount int
 	helpOpen             bool
@@ -137,6 +139,18 @@ func New(deps Deps) *Model {
 		relayConfigured:   m.relayConfigured,
 	})
 	m.addRelay = newAddRelayModal()
+	m.contactRequestSend = newContactRequestSendModal(contactRequestSendDeps{
+		messaging:         deps.Messaging,
+		ensureRelayClient: m.ensureRelayClient,
+		relayConfigured:   m.relayConfigured,
+		relayURL: func() string {
+			return m.relay.url
+		},
+		relayToken: func() string {
+			return m.relay.token
+		},
+		publishEnvelopes: publishRelayEnvelopes,
+	})
 	m.contactRequests = newContactRequestsModal(contactRequestsDeps{
 		decide: m.makeContactRequestDecision,
 	})
@@ -215,6 +229,14 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleAddRelaySavedMsg(msg)
 	case addRelayClosedMsg:
 		return m.handleAddRelayClosedMsg(msg)
+	case contactRequestSendResultMsg:
+		return m.handleContactRequestSendResult(msg)
+	case contactRequestSendClosedMsg:
+		return m.handleContactRequestSendClosedMsg(msg)
+	case contactVerifyConfirmedMsg:
+		return m.handleContactVerifyConfirmedMsg(msg)
+	case contactVerifyClosedMsg:
+		return m.handleContactVerifyClosedMsg(msg)
 	case editRelaySavedMsg:
 		return m.handleEditRelaySavedMsg(msg)
 	case contactRequestsClosedMsg:

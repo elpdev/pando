@@ -3,7 +3,6 @@ package ctlcmd
 import (
 	"fmt"
 	"os"
-	"time"
 
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
@@ -236,32 +235,11 @@ func runPublishDirectory(args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, *discoverable); err != nil {
+	if err := relayapi.PublishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, *discoverable); err != nil {
 		return err
 	}
 	fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)
 	fmt.Printf("fingerprint: %s\n", style.FormatFingerprint(id.Fingerprint()))
-	return nil
-}
-
-func publishIdentityDirectoryEntry(id *identity.Identity, relayURL, relayToken string, discoverable bool) error {
-	client, err := relayapi.NewClient(relayURL, relayToken)
-	if err != nil {
-		return err
-	}
-	signed, err := relayapi.SignDirectoryEntry(relayapi.DirectoryEntry{
-		Mailbox:      id.AccountID,
-		Bundle:       id.InviteBundle(),
-		Discoverable: discoverable,
-		PublishedAt:  time.Now().UTC(),
-		Version:      time.Now().UTC().UnixNano(),
-	}, id.AccountSigningPrivate)
-	if err != nil {
-		return err
-	}
-	if _, err := client.PublishDirectoryEntry(*signed); err != nil {
-		return err
-	}
 	return nil
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/passphrase"
+	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/ui/style"
 	qrterminal "github.com/mdp/qrterminal/v3"
 )
@@ -85,7 +86,7 @@ func runInit(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := publishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, false); err != nil {
+		if err := relayapi.PublishIdentityDirectoryEntry(id, resolvedRelayURL, resolvedRelayToken, false); err != nil {
 			return fmt.Errorf("publish relay directory entry: %w", err)
 		}
 		fmt.Printf("published trusted relay directory entry for %s\n", id.AccountID)

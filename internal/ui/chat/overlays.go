@@ -2,11 +2,9 @@ package chat
 
 import (
 	"fmt"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/messaging"
-	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
@@ -22,6 +20,16 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 	}
 	if m.addRelay.open {
 		if handled, cmd := m.addRelay.Update(msg); handled {
+			return true, cmd
+		}
+	}
+	if m.contactRequestSend.open {
+		if handled, cmd := m.contactRequestSend.Update(msg); handled {
+			return true, cmd
+		}
+	}
+	if m.contactVerify.open {
+		if handled, cmd := m.contactVerify.Update(msg); handled {
 			return true, cmd
 		}
 	}
@@ -89,81 +97,14 @@ func (m *Model) handleHelpKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {
+	if m.canVerifyActiveContact() && (msg.String() == "v" || msg.String() == "y") {
+		return m.openContactVerifyModal()
+	}
 	if msg.Type == tea.KeyEsc {
 		m.peerDetailOpen = false
 		if m.ui.focus == focusChat {
 			m.input.Focus()
 		}
-	}
-	return nil
-}
-
-func (m *Model) openCommandPalette() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount)
-	m.input.Blur()
-	return m.commandPalette.Open()
-}
-
-func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd {
-	switch action.command {
-	case commandPaletteCommandAddContact:
-		m.openAddContactModal()
-		return nil
-	case commandPaletteCommandContactRequests:
-		m.openContactRequestsModal()
-		return nil
-	case commandPaletteCommandAttachFile:
-		return m.handleAttachKey()
-	case commandPaletteCommandPeerDetail:
-		if m.peer.mailbox != "" {
-			m.peerDetailOpen = true
-		}
-		return nil
-	case commandPaletteCommandThemes:
-		return m.applyPaletteTheme(action.themeName)
-	case commandPaletteCommandRelays, commandPaletteCommandSwitchRelay:
-		return m.switchRelay(action.relayName)
-	case commandPaletteCommandAddRelay:
-		return m.openAddRelayModal()
-	case commandPaletteCommandRemoveRelay:
-		return m.removeRelayProfile(action.relayName)
-	case commandPaletteCommandEditRelay:
-		return m.openEditRelayModal(action.relayName)
-	case commandPaletteCommandMessageTTL:
-		return m.applyPaletteMessageTTL(action.messageTTL)
-	default:
-		return nil
-	}
-}
-
-func (m *Model) applyPaletteTheme(name string) tea.Cmd {
-	theme, ok := style.Themes[name]
-	if !ok {
-		m.pushToast(fmt.Sprintf("unknown theme %q", name), ToastBad)
-		return nil
-	}
-	style.Apply(theme)
-	m.pushToast(fmt.Sprintf("theme set to %s", name), ToastInfo)
-	if m.commandPalette.deps.saveTheme == nil {
-		return nil
-	}
-	if err := m.commandPalette.deps.saveTheme(name); err != nil {
-		m.pushToast(fmt.Sprintf("theme applied but not saved: %v", err), ToastWarn)
-	}
-	return nil
-}
-
-func (m *Model) applyPaletteMessageTTL(ttl time.Duration) tea.Cmd {
-	if ttl <= 0 {
-		return nil
-	}
-	m.messaging.SetMessageTTL(ttl)
-	m.pushToast(fmt.Sprintf("message TTL set to %s", formatMessageTTL(ttl)), ToastInfo)
-	if m.commandPalette.deps.saveMessageTTL == nil {
-		return nil
-	}
-	if err := m.commandPalette.deps.saveMessageTTL(ttl); err != nil {
-		m.pushToast(fmt.Sprintf("TTL applied but not saved: %v", err), ToastWarn)
 	}
 	return nil
 }

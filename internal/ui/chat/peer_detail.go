@@ -62,6 +62,13 @@ func (m *Model) renderPeerDetailModal(base string) string {
 		m.ui.width, m.ui.height,
 		title, subtitle,
 		[]string{strings.Join(rows, "\n")},
-		"esc to close",
+		m.peerDetailFooter(),
 	)
+}
+
+func (m *Model) peerDetailFooter() string {
+	if m.canVerifyActiveContact() {
+		return "v verify · esc close"
+	}
+	return "esc to close"
 }
