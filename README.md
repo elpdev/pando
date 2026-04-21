@@ -72,6 +72,39 @@ pando contact list --mailbox alice
 
 If you are connecting to a relay for the first time, publish your signed relay directory entry before starting the chat client. The easiest way is to do it during init with `pando identity init --publish-directory`. You can also publish later with `pando contact publish-directory --mailbox <mailbox>`.
 
+### Fastest relay setup for a new mailbox
+
+Point a device at your relay, create the mailbox, publish its signed relay directory entry, and opt into relay-backed discovery:
+
+```bash
+pando config set relay wss://pandorelay.network/ws
+pando config set relay-token <relay-token>
+pando config set mailbox cousin
+
+pando identity init --mailbox cousin --publish-directory
+pando contact publish-directory --mailbox cousin --discoverable
+```
+
+If your relay does not require auth, skip `pando config set relay-token`.
+
+### Fastest way to connect on the same relay
+
+If both people published with `--discoverable`, the requester can send a relay-backed contact request without manually exchanging invite codes:
+
+```bash
+pando contact request --mailbox alice --contact bob
+pando contact requests --mailbox bob
+pando contact accept --mailbox bob --contact alice
+```
+
+`pando contact request` looks up the recipient in the relay directory, so the recipient must already have published a discoverable directory entry.
+
+If you already trust the relay directory entry and want to add a contact immediately by mailbox, you can skip the request flow:
+
+```bash
+pando contact lookup --mailbox alice --contact bob
+```
+
 `pando contact add` now verifies the imported contact automatically. If you want to import without marking the contact trusted yet, use `pando contact import` and then run `pando contact verify` later.
 
 ### Fastest way to connect
@@ -111,6 +144,12 @@ Start the client:
 
 ```bash
 pando
+```
+
+Start a chat with a specific contact:
+
+```bash
+pando --mailbox alice --to bob
 ```
 
 ### Storage location
@@ -203,10 +242,18 @@ The `pando` binary handles both the TUI client and management subcommands:
 | `pando identity export-invite` | Export invite bundle to a JSON file |
 | `pando contact add` | Add and verify a contact (`--code`, `--paste`, `--from-clipboard`, `--stdin`, `--qr-image`) |
 | `pando contact import` | Import a contact without auto-verifying |
+| `pando contact discover` | List discoverable mailboxes published to the relay directory |
+| `pando contact request` | Send a relay-backed contact request to a discoverable mailbox |
+| `pando contact requests` | List saved incoming and outgoing contact requests |
+| `pando contact accept` | Accept a pending incoming contact request |
+| `pando contact reject` | Reject a pending incoming contact request |
+| `pando contact invite start` | Start a live relay rendezvous and print a short invite code |
+| `pando contact invite accept` | Join a live relay rendezvous using a short invite code |
 | `pando contact list` | List all contacts |
 | `pando contact show` | Show contact details |
 | `pando contact verify` | Mark a contact as verified |
-| `pando contact publish-directory` | Publish the signed relay directory entry for a mailbox |
+| `pando contact lookup` | Import a contact directly from the relay directory by mailbox |
+| `pando contact publish-directory` | Publish the signed relay directory entry for a mailbox (`--discoverable` also lists it in relay discovery) |
 | `pando device list` | List enrolled devices |
 | `pando device revoke` | Revoke a device |
 | `pando device enroll create` | Create an enrollment request for a new device |
