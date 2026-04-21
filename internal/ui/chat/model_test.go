@@ -1286,29 +1286,81 @@ func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 		t.Fatalf("typing envelopes: %v", err)
 	}
 	model.handleProtocolMessage(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelopes[0]})
-	view := model.View()
-	if !strings.Contains(view, "bob is typing") {
-		t.Fatalf("expected typing indicator in view: %q", view)
+	footer := strings.Join(model.FooterSegments(), "    ")
+	if !strings.Contains(footer, "bob is typing") {
+		t.Fatalf("expected typing indicator in footer: %q", footer)
 	}
 
 	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(typingAnimationInterval)))
-	view = model.View()
-	if !strings.Contains(view, "bob is typing") {
-		t.Fatalf("expected animated typing indicator in view: %q", view)
+	footer = strings.Join(model.FooterSegments(), "    ")
+	if !strings.Contains(footer, "bob is typing") {
+		t.Fatalf("expected animated typing indicator in footer: %q", footer)
 	}
 	// Verify spinner actually advanced (frame changed)
-	view2 := model.View()
+	footer2 := strings.Join(model.FooterSegments(), "    ")
 	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(2 * typingAnimationInterval)))
-	view3 := model.View()
-	if view2 == view3 {
-		t.Fatalf("expected typing indicator to animate between frames, got same view: %q", view3)
+	footer3 := strings.Join(model.FooterSegments(), "    ")
+	if footer2 == footer3 {
+		t.Fatalf("expected typing indicator to animate between frames, got same footer: %q", footer3)
 	}
 
 	model.typing.peerExpiresAt = time.Now().UTC().Add(-time.Second)
 	_, _ = model.Update(typingTickMsg(time.Now().UTC()))
-	view = model.View()
-	if strings.Contains(view, "bob is typing") {
-		t.Fatalf("expected typing indicator to expire: %q", view)
+	footer = strings.Join(model.FooterSegments(), "    ")
+	if strings.Contains(footer, "bob is typing") {
+		t.Fatalf("expected typing indicator to expire: %q", footer)
+	}
+}
+
+func TestTypingIndicatorDoesNotChangeViewportHeight(t *testing.T) {
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        aliceService,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(100, 20)
+	heightBefore := model.viewport.Height
+
+	envelopes, err := bobService.TypingEnvelopes("alice", messaging.TypingStateActive)
+	if err != nil {
+		t.Fatalf("typing envelopes: %v", err)
+	}
+	model.handleProtocolMessage(protocol.Message{Type: protocol.MessageTypeIncoming, Incoming: &envelopes[0]})
+	if model.viewport.Height != heightBefore {
+		t.Fatalf("expected typing indicator to keep viewport height stable, before=%d after=%d", heightBefore, model.viewport.Height)
+	}
+
+	model.typing.peerExpiresAt = time.Now().UTC().Add(-time.Second)
+	_, _ = model.Update(typingTickMsg(time.Now().UTC()))
+	if model.viewport.Height != heightBefore {
+		t.Fatalf("expected typing expiry to keep viewport height stable, before=%d after=%d", heightBefore, model.viewport.Height)
 	}
 }
 
