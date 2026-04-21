@@ -1757,7 +1757,7 @@ func TestCtrlPOpensCommandPalette(t *testing.T) {
 	if !model.commandPalette.open {
 		t.Fatal("expected ctrl+p to open command palette")
 	}
-	if !strings.Contains(model.View(), "Command Palette") {
+	if !strings.Contains(model.View(), "Pando") {
 		t.Fatalf("expected command palette in view: %q", model.View())
 	}
 }

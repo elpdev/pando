@@ -42,7 +42,7 @@ func (m commandPaletteModel) title() string {
 	if m.mode == commandPaletteModeEditRelay {
 		return "Edit Relay"
 	}
-	return "Command Palette"
+	return "Pando"
 }
 
 func (m commandPaletteModel) subtitle(peerLabel string) string {
