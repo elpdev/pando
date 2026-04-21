@@ -4,39 +4,40 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
 func (m *Model) renderPeerDetailModal(base string) string {
-	modalWidth := min(max(56, m.ui.width*2/3), max(40, m.ui.width-6))
-	verticalAlign := lipgloss.Center
-	if m.ui.width < narrowThreshold {
-		modalWidth = max(1, m.ui.width)
-		verticalAlign = lipgloss.Bottom
-	}
-	if modalWidth <= 0 || m.ui.height <= 0 {
+	if m.ui.width <= 0 || m.ui.height <= 0 {
 		return base
 	}
-	bodyWidth := max(24, modalWidth-6)
-	title := style.ModalTitle.Render("Peer detail")
-	mailboxLine := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
-	verifyLabel := identity.TrustLabel(m.peer.trustSource, m.peer.verified)
-	verifyLine := style.UnverifiedWarn.Render(verifyLabel)
-	if m.peer.verified {
-		verifyLine = style.VerifiedOk.Render(verifyLabel)
-	}
-	row := func(label, value string) string {
-		padLabel := style.Muted.Render(label)
-		return padLabel + "  " + value
-	}
-	parts := []string{title}
+
+	title := "Peer detail"
 	if m.peer.isRoom {
-		parts = append(parts,
-			style.StatusInfo.Bold(true).Render(m.peer.label),
-			"",
+		title = "Room detail"
+	}
+
+	var subtitle string
+	if m.peer.isRoom {
+		subtitle = style.StatusInfo.Bold(true).Render(m.peer.label)
+	} else {
+		verifyLabel := identity.TrustLabel(m.peer.trustSource, m.peer.verified)
+		verifyLine := style.UnverifiedWarn.Render(verifyLabel)
+		if m.peer.verified {
+			verifyLine = style.VerifiedOk.Render(verifyLabel)
+		}
+		mailboxLine := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
+		subtitle = mailboxLine + "  " + verifyLine
+	}
+
+	row := func(label, value string) string {
+		return style.Muted.Render(label) + "  " + value
+	}
+	var rows []string
+	if m.peer.isRoom {
+		rows = append(rows,
 			row("members", style.Bright.Render(fmt.Sprintf("%d/%d", m.peer.memberCount, messaging.DefaultRoomCap))),
 			row("status ", style.Muted.Render(map[bool]string{true: "joined", false: "not joined"}[m.peer.joined])),
 			row("relay  ", style.Muted.Render(m.relay.url)),
@@ -49,18 +50,18 @@ func (m *Model) renderPeerDetailModal(base string) string {
 		if contact, err := m.messaging.Contact(m.peer.mailbox); err == nil {
 			deviceCount = len(contact.ActiveDevices())
 		}
-		parts = append(parts,
-			mailboxLine+"  "+verifyLine,
-			"",
+		rows = append(rows,
 			row("fingerprint", style.Bright.Render(fpLong)),
 			row("short     ", style.Muted.Render(shortFp)),
 			row("devices   ", style.Bright.Render(fmt.Sprintf("%d active", deviceCount))),
 			row("relay     ", style.Muted.Render(m.relay.url)),
 		)
 	}
-	parts = append(parts, "", style.Subtle.Render("ctrl+p or esc to close"))
-	body := lipgloss.NewStyle().Width(bodyWidth).Render(strings.Join(parts, "\n"))
-	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
-	return lipgloss.Place(m.ui.width, m.ui.height, lipgloss.Center, verticalAlign, modal,
-		lipgloss.WithWhitespaceBackground(style.BackdropTint))
+
+	return renderPaletteOverlay(
+		m.ui.width, m.ui.height,
+		title, subtitle,
+		[]string{strings.Join(rows, "\n")},
+		"ctrl+p · esc to close",
+	)
 }

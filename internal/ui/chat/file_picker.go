@@ -161,9 +161,9 @@ func (m filePickerModel) View() string {
 			lines = append(lines, style.PaletteMeta.Render("..."))
 		}
 	}
-	footer := "type to filter   up/down browse   enter open or select   esc cancel"
+	footer := "type to filter · up/down browse · enter open or select · esc cancel"
 	if strings.TrimSpace(m.filter.Value()) == "" {
-		footer = "type to filter   up/down browse   enter open or select   backspace up   esc cancel"
+		footer = "type to filter · up/down browse · enter open or select · backspace up · esc cancel"
 	}
 	return renderPaletteOverlay(m.width, max(1, m.height), "Attach File", "Browse locally and queue one attachment.", []string{strings.Join(lines, "\n")}, footer)
 }

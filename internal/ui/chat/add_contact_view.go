@@ -190,20 +190,20 @@ func (m addContactModal) footer() string {
 	}
 	switch m.mode {
 	case addContactModeChooser:
-		return "up/down move   enter choose   p/l/i jump   esc cancel"
+		return "up/down move · enter choose · p/l/i jump · esc cancel"
 	case addContactModePaste:
 		if m.preview != nil {
-			return "ctrl+s import and verify   esc back"
+			return "ctrl+s import and verify · esc back"
 		}
-		return "enter newline  ctrl+s preview  ctrl+u clear  esc back"
+		return "enter newline · ctrl+s preview · ctrl+u clear · esc back"
 	case addContactModeLookup:
-		return "enter submit  ctrl+u clear  esc back"
+		return "enter submit · ctrl+u clear · esc back"
 	case addContactModeInviteChoice:
-		return "up/down move   enter choose   s/a jump   esc back"
+		return "up/down move · enter choose · s/a jump · esc back"
 	case addContactModeInviteStart:
 		return "esc back"
 	case addContactModeInviteAccept:
-		return "enter submit  ctrl+u clear  esc back"
+		return "enter submit · ctrl+u clear · esc back"
 	default:
 		return ""
 	}

@@ -30,6 +30,10 @@ type Theme struct {
 	// Banner + room accents.
 	BannerText, BannerSlash, RoomAccent lipgloss.Color
 
+	// PaletteAccent is the signature hue for command palettes — border,
+	// header slashes, match highlights. Picked to pop against BgModal.
+	PaletteAccent lipgloss.Color
+
 	// Peer-accent palette — rotating stable hues assigned per fingerprint.
 	PeerAccents []lipgloss.Color
 }
@@ -144,7 +148,7 @@ func Apply(t Theme) {
 
 	PaletteModal = lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(t.Faint).
+		BorderForeground(t.PaletteAccent).
 		Background(t.BgModal)
 
 	PaletteInput = lipgloss.NewStyle().
@@ -156,6 +160,7 @@ func Apply(t Theme) {
 	PaletteSelectedItem = lipgloss.NewStyle().
 		Background(t.BgPalette).
 		Foreground(t.Bright).
+		Bold(true).
 		Padding(0, 1)
 
 	InputBorder = lipgloss.NewStyle().
@@ -166,8 +171,8 @@ func Apply(t Theme) {
 	PaletteMeta = Muted
 	PaletteFooter = Subtle
 	PaletteShortcut = Subtle
-	PaletteAccent = StatusInfo
-	PaletteMatch = Bright.Underline(true)
+	PaletteAccent = lipgloss.NewStyle().Foreground(t.PaletteAccent).Bold(true)
+	PaletteMatch = lipgloss.NewStyle().Foreground(t.PaletteAccent).Bold(true)
 
 	// Banner.
 	BannerText = lipgloss.NewStyle().Foreground(t.BannerText).Bold(true)
@@ -190,7 +195,7 @@ func classicTheme() Theme {
 
 		BgSel:     lipgloss.Color("238"),
 		BgModal:   lipgloss.Color("234"),
-		BgPalette: lipgloss.Color("236"),
+		BgPalette: lipgloss.Color("61"),
 		Divider:   lipgloss.Color("60"),
 
 		Ok:   lipgloss.Color("86"),
@@ -201,6 +206,8 @@ func classicTheme() Theme {
 		BannerText:  lipgloss.Color("#9FE8B0"), // CRT phosphor
 		BannerSlash: lipgloss.Color("#FFB347"), // warm amber
 		RoomAccent:  lipgloss.Color("69"),      // matches Info
+
+		PaletteAccent: lipgloss.Color("141"), // lilac — crush-style purple
 
 		PeerAccents: []lipgloss.Color{
 			lipgloss.Color("75"),  // sky blue
@@ -242,6 +249,8 @@ func phosphorTheme() Theme {
 		BannerText:  lipgloss.Color("#9FE8B0"), // phosphor
 		BannerSlash: lipgloss.Color("#FFB347"), // amber
 		RoomAccent:  lipgloss.Color("#6FD0E3"), // cyan
+
+		PaletteAccent: lipgloss.Color("#FFB347"), // amber — echoes banner slashes
 
 		PeerAccents: []lipgloss.Color{
 			lipgloss.Color("#9FE8B0"), // phosphor
