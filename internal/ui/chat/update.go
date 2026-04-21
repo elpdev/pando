@@ -173,7 +173,8 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 			m.pushToast(err.Error(), ToastBad)
 			return m, nil
 		}
-		m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "outbound", sender: m.messaging.Identity().AccountID, body: body, timestamp: time.Now().UTC(), messageID: batchMessageID(batch), status: statusPending})
+		now := time.Now().UTC()
+		m.appendMessageItem(messageItem{kind: transcriptMessage, direction: "outbound", sender: m.messaging.Identity().AccountID, body: body, timestamp: now, messageID: batchMessageID(batch), status: statusPending, expiresAt: m.outgoingItemExpiresAt(now)})
 		m.input.SetValue("")
 		m.syncComposer()
 		m.resetLocalTypingState()
@@ -185,14 +186,16 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 		m.pushToast(err.Error(), ToastBad)
 		return m, nil
 	}
+	now := time.Now().UTC()
 	m.appendMessageItem(messageItem{
 		kind:      transcriptMessage,
 		direction: "outbound",
 		sender:    m.mailbox,
 		body:      body,
-		timestamp: time.Now().UTC(),
+		timestamp: now,
 		messageID: batchMessageID(batch),
 		status:    statusPending,
+		expiresAt: m.outgoingItemExpiresAt(now),
 	})
 	m.input.SetValue("")
 	m.syncComposer()
@@ -227,6 +230,10 @@ func (m *Model) handleTypingTickMsg(msg typingTickMsg) (*Model, tea.Cmd) {
 	}
 	if m.ui.toast != nil && !now.Before(m.ui.toast.expiresAt) {
 		m.ui.toast = nil
+	}
+	if m.purgeExpiredTranscript(now) {
+		m.renderMessages()
+		m.syncViewport()
 	}
 	var spCmd tea.Cmd
 	if m.typing.peerVisible {

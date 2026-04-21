@@ -1595,6 +1595,39 @@ func TestRenderMessagesGroupsByConsecutiveSender(t *testing.T) {
 	}
 }
 
+func TestTypingTickPurgesExpiredTranscriptItems(t *testing.T) {
+	clientStore := store.NewClientStore(t.TempDir())
+	service, _, err := messaging.New(clientStore, "alice")
+	if err != nil {
+		t.Fatalf("new service: %v", err)
+	}
+	model := New(Deps{
+		Client:           stubClient{},
+		Messaging:        service,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.SetSize(120, 20)
+
+	now := time.Now().UTC()
+	model.msgs.items = []messageItem{
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "stale", timestamp: now.Add(-2 * time.Hour), messageID: "stale", expiresAt: now.Add(-time.Hour)},
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "fresh", timestamp: now.Add(-30 * time.Minute), messageID: "fresh", expiresAt: now.Add(30 * time.Minute)},
+		{kind: transcriptMessage, direction: "outbound", sender: "alice", body: "forever", timestamp: now.Add(-time.Hour), messageID: "forever"},
+	}
+
+	updated, _ := model.handleTypingTickMsg(typingTickMsg(now))
+	if len(updated.msgs.items) != 2 {
+		t.Fatalf("expected 2 items after purge, got %d: %+v", len(updated.msgs.items), updated.msgs.items)
+	}
+	for _, item := range updated.msgs.items {
+		if item.messageID == "stale" {
+			t.Fatalf("expired item was not purged: %+v", item)
+		}
+	}
+}
+
 func TestRenderMessagesFlipsTickOnDeliveryAck(t *testing.T) {
 	clientStore := store.NewClientStore(t.TempDir())
 	service, _, err := messaging.New(clientStore, "alice")

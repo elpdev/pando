@@ -380,6 +380,80 @@ func TestDefaultRoomHistorySyncHonorsSevenDayLimit(t *testing.T) {
 	}
 }
 
+func TestDefaultRoomHistorySyncPreservesExpiresAt(t *testing.T) {
+	now := time.Now().UTC().Round(time.Second)
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	seedRoomSyncContacts(t, aliceStore, aliceService, bobStore, bobService)
+	seedRoomSyncState(t, aliceStore, aliceService.Identity(), now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	seedRoomSyncState(t, bobStore, bobService.Identity(), now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	expiresAt := now.Add(12 * time.Hour)
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "with-ttl", SenderAccountID: "alice", Body: "ephemeral", Timestamp: now.Add(-time.Hour), ExpiresAt: expiresAt}); err != nil {
+		t.Fatalf("append history with ttl: %v", err)
+	}
+
+	results := syncDefaultRoomHistory(t, aliceService, bobService)
+	if len(results) == 0 || results[len(results)-1].RoomSync == nil || !results[len(results)-1].RoomSync.Complete {
+		t.Fatalf("expected completed room sync results: %+v", results)
+	}
+	history, err := bobService.DefaultRoomHistory()
+	if err != nil {
+		t.Fatalf("load bob room history: %v", err)
+	}
+	if len(history) != 1 || history[0].MessageID != "with-ttl" {
+		t.Fatalf("expected with-ttl record synced, got %+v", history)
+	}
+	if !history[0].ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expected synced ExpiresAt %s, got %s", expiresAt, history[0].ExpiresAt)
+	}
+}
+
+func TestDefaultRoomHistorySyncDropsAlreadyExpired(t *testing.T) {
+	now := time.Now().UTC().Round(time.Second)
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	seedRoomSyncContacts(t, aliceStore, aliceService, bobStore, bobService)
+	seedRoomSyncState(t, aliceStore, aliceService.Identity(), now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	seedRoomSyncState(t, bobStore, bobService.Identity(), now.Add(-48*time.Hour), now.Add(-24*time.Hour))
+	// Seed alice with a record whose expiry is already in the past. It will be
+	// filtered out on Alice's LoadRoomHistory (inline sweep), so it can't reach
+	// Bob's sync payload. Also seed a fresh one to confirm the sync still works.
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "stale", SenderAccountID: "alice", Body: "stale", Timestamp: now.Add(-2 * time.Hour), ExpiresAt: now.Add(-time.Hour)}); err != nil {
+		t.Fatalf("append stale history: %v", err)
+	}
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "fresh", SenderAccountID: "alice", Body: "fresh", Timestamp: now.Add(-time.Hour), ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatalf("append fresh history: %v", err)
+	}
+
+	results := syncDefaultRoomHistory(t, aliceService, bobService)
+	if len(results) == 0 || results[len(results)-1].RoomSync == nil || !results[len(results)-1].RoomSync.Complete {
+		t.Fatalf("expected completed room sync results: %+v", results)
+	}
+	history, err := bobService.DefaultRoomHistory()
+	if err != nil {
+		t.Fatalf("load bob room history: %v", err)
+	}
+	if len(history) != 1 || history[0].MessageID != "fresh" {
+		t.Fatalf("expected only fresh record, got %+v", history)
+	}
+}
+
 func seedRoomSyncContacts(t *testing.T, aliceStore *store.ClientStore, aliceService *Service, bobStore *store.ClientStore, bobService *Service) {
 	t.Helper()
 	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())

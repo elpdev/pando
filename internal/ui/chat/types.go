@@ -69,6 +69,7 @@ type messageItem struct {
 	imageRendered string
 	imageWidth    int
 	meta          string
+	expiresAt     time.Time // zero means no expiry; purged from the live transcript once reached
 }
 
 // deliveryStatus is a four-state outbound lifecycle. Inbound messages ignore

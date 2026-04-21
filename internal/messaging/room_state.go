@@ -28,6 +28,7 @@ func roomHistoryMessages(records []store.RoomMessageRecord) []roomHistoryMessage
 			SenderMailbox:   record.SenderMailbox,
 			Body:            record.Body,
 			Timestamp:       record.Timestamp,
+			ExpiresAt:       record.ExpiresAt,
 		})
 	}
 	return messages
