@@ -435,6 +435,33 @@ func TestAddContactChooserDisablesRelayPathsWithoutRelay(t *testing.T) {
 	}
 }
 
+func TestAddContactChooserArrowNavigationUsesSelectedAction(t *testing.T) {
+	relay := newFakeRelay()
+	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.addContact.mode != addContactModeLookup {
+		t.Fatalf("expected lookup mode after selecting second row, got %v", model.addContact.mode)
+	}
+}
+
+func TestAddContactInviteChoiceArrowNavigationUsesSelectedAction(t *testing.T) {
+	relay := newFakeRelay()
+	model, _ := newChatModel(t, "alice", relay, "ws://relay/ws")
+
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyDown})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if model.addContact.mode != addContactModeInviteAccept {
+		t.Fatalf("expected invite-accept mode after selecting second row, got %v", model.addContact.mode)
+	}
+}
+
 func TestAddContactLookupSurfacesRelayError(t *testing.T) {
 	relay := newFakeRelay()
 	relay.lookupErr = errors.New("relay 500")

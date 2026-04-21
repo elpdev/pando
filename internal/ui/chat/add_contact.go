@@ -65,6 +65,7 @@ type addContactModal struct {
 	deps        addContactDeps
 	open        bool
 	mode        addContactMode
+	selected    int
 	value       string
 	code        string
 	error       string
@@ -98,6 +99,7 @@ func (m *addContactModal) Init() tea.Cmd {
 func (m *addContactModal) Open() tea.Cmd {
 	m.open = true
 	m.mode = addContactModeChooser
+	m.selected = 0
 	m.value = ""
 	m.code = ""
 	m.error = ""
@@ -115,6 +117,7 @@ func (m *addContactModal) Close() {
 	}
 	m.open = false
 	m.mode = addContactModeChooser
+	m.selected = 0
 	m.value = ""
 	m.code = ""
 	m.error = ""
@@ -233,6 +236,7 @@ func (m *addContactModal) syncInviteValue() {
 
 func (m *addContactModal) setMode(mode addContactMode) tea.Cmd {
 	m.mode = mode
+	m.selected = 0
 	m.error = ""
 	m.preview = nil
 	m.value = ""

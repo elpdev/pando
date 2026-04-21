@@ -1107,6 +1107,68 @@ func TestFilePickerVisibleEntriesStayWithinWindow(t *testing.T) {
 	}
 }
 
+func TestFilePickerFiltersEntriesFromTypedQuery(t *testing.T) {
+	model := &Model{}
+	model.filePicker = newFilePickerModel()
+	model.filePicker.open = true
+	_ = model.filePicker.filter.Focus()
+	model.filePicker.SetSize(80, 20)
+	model.filePicker.entries = []filePickerEntry{{Name: "..", IsDir: true, IsParent: true}, {Name: "draft.txt"}, {Name: "photo.png"}}
+
+	updatedPicker, _ := model.filePicker.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("dr")})
+	model.filePicker = updatedPicker
+
+	filtered := model.filePicker.filteredEntries()
+	if len(filtered) != 1 || filtered[0].Name != "draft.txt" {
+		t.Fatalf("expected only draft.txt after filtering, got %+v", filtered)
+	}
+	view := model.filePicker.View()
+	if !strings.Contains(view, "draft.txt") {
+		t.Fatalf("expected filtered view to show draft.txt: %q", view)
+	}
+	if strings.Contains(view, "photo.png") {
+		t.Fatalf("expected filtered view to hide photo.png: %q", view)
+	}
+}
+
+func TestFilePickerBackspaceEditsFilterBeforeNavigatingUp(t *testing.T) {
+	root := t.TempDir()
+	child := filepath.Join(root, "docs")
+	if err := os.Mkdir(child, 0o700); err != nil {
+		t.Fatalf("mkdir child dir: %v", err)
+	}
+
+	model := &Model{}
+	model.filePicker = newFilePickerModel()
+	if err := model.filePicker.openAt(child); err != nil {
+		t.Fatalf("open picker at child dir: %v", err)
+	}
+
+	updatedPicker, _ := model.filePicker.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("doc")})
+	model.filePicker = updatedPicker
+	updatedPicker, _ = model.filePicker.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model.filePicker = updatedPicker
+	if model.filePicker.dir != child {
+		t.Fatalf("expected picker to stay in child dir while editing filter, got %q", model.filePicker.dir)
+	}
+	if model.filePicker.filter.Value() != "do" {
+		t.Fatalf("expected backspace to edit filter first, got %q", model.filePicker.filter.Value())
+	}
+
+	updatedPicker, _ = model.filePicker.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model.filePicker = updatedPicker
+	updatedPicker, _ = model.filePicker.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model.filePicker = updatedPicker
+	if model.filePicker.filter.Value() != "" {
+		t.Fatalf("expected filter to be cleared, got %q", model.filePicker.filter.Value())
+	}
+	updatedPicker, _ = model.filePicker.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	model.filePicker = updatedPicker
+	if model.filePicker.dir != root {
+		t.Fatalf("expected final backspace to navigate to parent dir, got %q", model.filePicker.dir)
+	}
+}
+
 func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := messaging.New(aliceStore, "alice")

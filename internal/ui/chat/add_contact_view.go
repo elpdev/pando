@@ -16,22 +16,17 @@ type addContactMenuItem struct {
 }
 
 func (m addContactModal) Overlay(_ string, width, height int) string {
-	modalWidth := min(max(58, width*2/3), max(40, width-6))
-	modalHeight := min(max(15, height*2/3), max(12, height-4))
+	modalWidth := paletteWidth(width)
+	modalHeight := paletteHeight(height)
 	if modalWidth <= 0 || modalHeight <= 0 {
 		return ""
 	}
 
-	title := style.ModalTitle.Render("Add Contact")
-	parts := []string{title, m.View(modalWidth-6, modalHeight)}
+	bodyParts := []string{m.View(modalWidth-6, modalHeight)}
 	if m.error != "" {
-		parts = append(parts, style.StatusBad.Width(modalWidth-6).Render(m.error))
+		bodyParts = append(bodyParts, style.StatusBad.Width(modalWidth-6).Render(m.error))
 	}
-	parts = append(parts, style.Subtle.Render(m.footer()))
-
-	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(strings.Join(parts, "\n\n"))
-	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, modal,
-		lipgloss.WithWhitespaceBackground(style.BackdropTint))
+	return renderPaletteOverlay(width, height, "Add Contact", "Secure onboarding for a new peer.", bodyParts, m.footer())
 }
 
 func (m addContactModal) View(width, modalHeight int) string {
@@ -54,14 +49,17 @@ func (m addContactModal) View(width, modalHeight int) string {
 }
 
 func (m addContactModal) renderChooser(width int) string {
-	return m.renderMenu(width,
-		style.Dim.Width(width).Render("How do you want to add this contact?"),
-		[]addContactMenuItem{
-			{key: "p", label: "paste invite", hint: "paste an invite code or bundle"},
-			{key: "l", label: "lookup mailbox", hint: "resolve via the trusted relay directory", disabled: !m.relayConfigured()},
-			{key: "i", label: "invite exchange", hint: "share a short code with a peer", disabled: !m.relayConfigured()},
-		},
-	)
+	lines := []string{style.PaletteMeta.Width(width).Render("Choose a trust path, then confirm it from the keyboard.")}
+	for idx, item := range m.chooserItems() {
+		detail := item.hint
+		meta := strings.ToUpper(item.key)
+		if item.disabled {
+			detail = "relay required"
+			meta = "OFF"
+		}
+		lines = append(lines, renderPaletteListItem(width, idx == m.selected, item.label, detail, meta))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m addContactModal) renderPaste(width, modalHeight int) string {
@@ -69,7 +67,7 @@ func (m addContactModal) renderPaste(width, modalHeight int) string {
 		return m.renderPreview(width)
 	}
 	inputHeight := max(5, modalHeight-12)
-	description := style.Dim.Width(width).Render("Paste a raw invite code or the full invite text. Pressing ctrl+s parses it and shows a preview before anything is saved.")
+	description := style.PaletteMeta.Width(width).Render("Paste an invite code or the exported invite text. `ctrl+s` previews it before import.")
 	return strings.Join([]string{description, m.renderPasteEditor(width, inputHeight)}, "\n\n")
 }
 
@@ -77,24 +75,22 @@ func (m addContactModal) renderLookup(width int) string {
 	m.lookupInput.Width = max(1, width-4)
 	status := ""
 	if m.busy {
-		status = style.Subtle.Render("looking up...")
+		status = style.PaletteMeta.Render("looking up...")
 	}
 	return renderAddContactForm(
 		width,
-		"Look up a contact in the trusted relay directory. The peer must have run `pando contact publish-directory` first.",
-		style.InputBorder.Width(width).Padding(0, 1).Render(m.lookupInput.View()),
+		"Look up a contact in the trusted relay directory. They need to publish their directory entry first.",
+		style.PaletteInput.Width(width).Padding(0, 1).Render(m.lookupInput.View()),
 		status,
 	)
 }
 
 func (m addContactModal) renderInviteChoice(width int) string {
-	return m.renderMenu(width,
-		style.Dim.Width(width).Render("Invite exchange: are you creating a new code or accepting one?"),
-		[]addContactMenuItem{
-			{key: "s", label: "start", hint: "generate a code and wait for the peer"},
-			{key: "a", label: "accept", hint: "enter a code the peer shared with you"},
-		},
-	)
+	lines := []string{style.PaletteMeta.Width(width).Render("Invite exchange lets two peers verify each other with one short shared code.")}
+	for idx, item := range m.inviteChoiceItems() {
+		lines = append(lines, renderPaletteListItem(width, idx == m.selected, item.label, item.hint, strings.ToUpper(item.key)))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m addContactModal) renderInviteStart(width int) string {
@@ -104,12 +100,12 @@ func (m addContactModal) renderInviteStart(width int) string {
 	}
 	status := ""
 	if m.busy {
-		status = style.Subtle.Render("waiting for peer...")
+		status = style.PaletteMeta.Render("waiting for peer...")
 	}
 	return renderAddContactForm(
 		width,
-		"Share this code with the other person, then wait while they accept it. Press Esc to cancel, or `a` to switch to accepting their code instead.",
-		style.InputBorder.Width(width).Padding(0, 1).Render(style.Muted.Render("invite code")+"  "+codeValue),
+		"Share this code, then wait for the other person to accept it. Press Esc to cancel, or `a` to switch sides.",
+		style.PaletteInput.Width(width).Padding(0, 1).Render(style.Muted.Render("invite code")+"  "+codeValue),
 		status,
 	)
 }
@@ -118,12 +114,12 @@ func (m addContactModal) renderInviteAccept(width int) string {
 	m.inviteInput.Width = max(1, width-4)
 	status := ""
 	if m.busy {
-		status = style.Subtle.Render("waiting for peer...")
+		status = style.PaletteMeta.Render("waiting for peer...")
 	}
 	return renderAddContactForm(
 		width,
-		"Enter the code the other person shared. Press Enter to submit.",
-		style.InputBorder.Width(width).Padding(0, 1).Render(m.inviteInput.View()),
+		"Enter the code the other person shared, then press Enter to continue.",
+		style.PaletteInput.Width(width).Padding(0, 1).Render(m.inviteInput.View()),
 		status,
 	)
 }
@@ -162,7 +158,7 @@ func (m addContactModal) renderPasteEditor(width, height int) string {
 	if len(m.value) >= addContactLimit {
 		meta = style.StatusBad.Render(fmt.Sprintf("input limit reached (%d chars)", addContactLimit))
 	}
-	box := style.InputBorder.Width(width).Height(height).Padding(0, 1).Render(visible)
+	box := style.PaletteInput.Width(width).Height(height).Padding(0, 1).Render(visible)
 	return strings.Join([]string{box, meta}, "\n")
 }
 
@@ -181,7 +177,7 @@ func (m addContactModal) renderMenu(width int, description string, items []addCo
 }
 
 func renderAddContactForm(width int, description string, boxContent string, status string) string {
-	parts := []string{style.Dim.Width(width).Render(description), boxContent}
+	parts := []string{style.PaletteMeta.Width(width).Render(description), boxContent}
 	if status != "" {
 		parts = append(parts, status)
 	}
@@ -194,7 +190,7 @@ func (m addContactModal) footer() string {
 	}
 	switch m.mode {
 	case addContactModeChooser:
-		return "p paste   l lookup   i invite   esc cancel"
+		return "up/down move   enter choose   p/l/i jump   esc cancel"
 	case addContactModePaste:
 		if m.preview != nil {
 			return "ctrl+s import and verify   esc back"
@@ -203,12 +199,27 @@ func (m addContactModal) footer() string {
 	case addContactModeLookup:
 		return "enter submit  ctrl+u clear  esc back"
 	case addContactModeInviteChoice:
-		return "s start  a accept  esc back"
+		return "up/down move   enter choose   s/a jump   esc back"
 	case addContactModeInviteStart:
 		return "esc back"
 	case addContactModeInviteAccept:
 		return "enter submit  ctrl+u clear  esc back"
 	default:
 		return ""
+	}
+}
+
+func (m addContactModal) chooserItems() []addContactMenuItem {
+	return []addContactMenuItem{
+		{key: "p", label: "Paste Invite", hint: "Import a full invite code or bundle."},
+		{key: "l", label: "Lookup Mailbox", hint: "Resolve a peer from the trusted relay directory.", disabled: !m.relayConfigured()},
+		{key: "i", label: "Invite Exchange", hint: "Verify a peer together with a short rendezvous code.", disabled: !m.relayConfigured()},
+	}
+}
+
+func (m addContactModal) inviteChoiceItems() []addContactMenuItem {
+	return []addContactMenuItem{
+		{key: "s", label: "Start New Code", hint: "Generate a code and wait for the other person."},
+		{key: "a", label: "Accept Shared Code", hint: "Enter a code someone already shared with you."},
 	}
 }

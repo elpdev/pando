@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -32,12 +32,21 @@ type filePickerModel struct {
 	dir      string
 	entries  []filePickerEntry
 	selected int
+	filter   textinput.Model
 	width    int
 	height   int
 }
 
 func newFilePickerModel() filePickerModel {
-	return filePickerModel{dir: defaultFilePickerDir()}
+	return filePickerModel{dir: defaultFilePickerDir(), filter: newFilePickerInput()}
+}
+
+func newFilePickerInput() textinput.Model {
+	input := textinput.New()
+	input.Prompt = ""
+	input.Placeholder = "Type to filter files"
+	input.CharLimit = 256
+	return input
 }
 
 func defaultFilePickerDir() string {
@@ -67,6 +76,7 @@ func (m *filePickerModel) Close() {
 	m.open = false
 	m.entries = nil
 	m.selected = 0
+	m.filter = newFilePickerInput()
 }
 
 func (m filePickerModel) Update(msg tea.Msg) (filePickerModel, tea.Cmd) {
@@ -75,21 +85,32 @@ func (m filePickerModel) Update(msg tea.Msg) (filePickerModel, tea.Cmd) {
 	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
-		return m, nil
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		return m, cmd
 	}
 	switch keyMsg.Type {
 	case tea.KeyEsc:
 		m.Close()
 		return m, func() tea.Msg { return filePickerClosedMsg{} }
 	case tea.KeyBackspace:
+		if strings.TrimSpace(m.filter.Value()) != "" {
+			before := m.filter.Value()
+			var cmd tea.Cmd
+			m.filter, cmd = m.filter.Update(msg)
+			if m.filter.Value() != before {
+				m.selected = 0
+			}
+			return m, cmd
+		}
 		if err := m.goToParentDirectory(); err != nil {
 			return m, func() tea.Msg { return filePickerErrorMsg{err: err} }
 		}
 		return m, nil
-	case tea.KeyUp:
+	case tea.KeyUp, tea.KeyCtrlP:
 		m.moveSelection(-1)
 		return m, nil
-	case tea.KeyDown:
+	case tea.KeyDown, tea.KeyCtrlN:
 		m.moveSelection(1)
 		return m, nil
 	case tea.KeyEnter:
@@ -106,35 +127,45 @@ func (m filePickerModel) Update(msg tea.Msg) (filePickerModel, tea.Cmd) {
 		m.Close()
 		return m, func() tea.Msg { return filePickerSelectedMsg{path: entry.Path} }
 	default:
-		return m, nil
+		before := m.filter.Value()
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		if m.filter.Value() != before {
+			m.selected = 0
+		}
+		return m, cmd
 	}
 }
 
 func (m filePickerModel) View() string {
-	title := style.Bold.Render("Attach File")
-	dirLine := style.Muted.Render(m.dir)
-	hint := style.Muted.Render("enter open/select  |  backspace up  |  esc cancel")
-	lines := []string{title, dirLine, hint, ""}
-	modalWidth := min(max(48, m.width-6), m.width)
-	rowWidth := max(1, modalWidth-6)
-	visibleEntries, hiddenAbove, hiddenBelow := m.visibleEntries(max(1, m.height-12))
-	if len(m.entries) == 0 {
-		lines = append(lines, style.Muted.Render("(empty) - backspace to go up"))
+	bodyWidth := max(1, paletteWidth(m.width)-6)
+	filterBox := style.PaletteInput.Width(bodyWidth).Padding(0, 1).Render(m.filter.View())
+	lines := []string{style.PaletteMeta.Width(bodyWidth).Render(m.dir), filterBox}
+	visibleEntries, hiddenAbove, hiddenBelow := m.visibleEntries(max(1, paletteHeight(m.height)-11))
+	if len(visibleEntries) == 0 {
+		emptyText := "(empty)"
+		if strings.TrimSpace(m.filter.Value()) != "" {
+			emptyText = "No files match this filter."
+		} else if len(m.entries) > 0 {
+			emptyText = "(empty) - backspace to go up"
+		}
+		lines = append(lines, style.Muted.Render(emptyText))
 	} else {
 		if hiddenAbove {
-			lines = append(lines, style.Muted.Render("..."))
+			lines = append(lines, style.PaletteMeta.Render("..."))
 		}
 		for _, visible := range visibleEntries {
-			lines = append(lines, m.renderRow(visible.entry, visible.index == m.selected, rowWidth))
+			lines = append(lines, m.renderRow(visible.entry, visible.index == m.selected, bodyWidth))
 		}
 		if hiddenBelow {
-			lines = append(lines, style.Muted.Render("..."))
+			lines = append(lines, style.PaletteMeta.Render("..."))
 		}
 	}
-	modalHeight := max(8, m.height-4)
-	modal := style.Modal.Padding(1).Width(max(1, modalWidth-4)).Height(max(1, modalHeight-4)).Render(strings.Join(lines, "\n"))
-	return lipgloss.Place(m.width, max(1, m.height), lipgloss.Center, lipgloss.Center, modal,
-		lipgloss.WithWhitespaceBackground(style.BackdropTint))
+	footer := "type to filter   up/down browse   enter open or select   esc cancel"
+	if strings.TrimSpace(m.filter.Value()) == "" {
+		footer = "type to filter   up/down browse   enter open or select   backspace up   esc cancel"
+	}
+	return renderPaletteOverlay(m.width, max(1, m.height), "Attach File", "Browse locally and queue one attachment.", []string{strings.Join(lines, "\n")}, footer)
 }
 
 func (m *filePickerModel) openAt(dir string) error {
@@ -146,6 +177,8 @@ func (m *filePickerModel) openAt(dir string) error {
 	m.dir = cleanedDir
 	m.entries = entries
 	m.selected = 0
+	m.filter = newFilePickerInput()
+	_ = m.filter.Focus()
 	return nil
 }
 
@@ -158,23 +191,22 @@ func (m *filePickerModel) goToParentDirectory() error {
 }
 
 func (m *filePickerModel) moveSelection(delta int) {
-	if len(m.entries) == 0 {
+	filtered := m.filteredEntries()
+	if len(filtered) == 0 {
 		return
 	}
-	m.selected += delta
+	m.selected = (m.selected + delta) % len(filtered)
 	if m.selected < 0 {
-		m.selected = 0
-	}
-	if m.selected >= len(m.entries) {
-		m.selected = len(m.entries) - 1
+		m.selected += len(filtered)
 	}
 }
 
 func (m *filePickerModel) selectedEntry() *filePickerEntry {
-	if m.selected < 0 || m.selected >= len(m.entries) {
+	filtered := m.filteredEntries()
+	if m.selected < 0 || m.selected >= len(filtered) {
 		return nil
 	}
-	return &m.entries[m.selected]
+	return &filtered[m.selected]
 }
 
 func (m filePickerModel) renderRow(entry filePickerEntry, selected bool, width int) string {
@@ -182,33 +214,30 @@ func (m filePickerModel) renderRow(entry filePickerEntry, selected bool, width i
 	if entry.IsDir {
 		label += string(filepath.Separator)
 	}
-	sizeStr := ""
+	detail := ""
+	meta := ""
+	if entry.IsParent {
+		detail = "Go to the parent directory."
+		meta = "UP"
+	}
 	if !entry.IsDir {
-		sizeStr = formatFileSize(entry.Size)
+		detail = "Ready to attach this file."
+		meta = formatFileSize(entry.Size)
+	} else if !entry.IsParent {
+		detail = "Open this directory."
+		meta = "DIR"
 	}
-	pad := width - lipgloss.Width(label) - lipgloss.Width(sizeStr)
-	if pad < 1 {
-		pad = 1
-	}
-	line := label + strings.Repeat(" ", pad) + style.Muted.Render(sizeStr)
-
-	rowStyle := lipgloss.NewStyle().Width(width)
-	if entry.IsDir {
-		rowStyle = rowStyle.Inherit(style.StatusOk)
-	}
-	if selected {
-		rowStyle = rowStyle.Inherit(style.Selected).Bold(true)
-	}
-	return rowStyle.Render(line)
+	return renderPaletteListItemMatched(width, selected, label, detail, meta, subsequenceMatch(label, m.filter.Value()))
 }
 
 func (m filePickerModel) visibleEntries(maxEntries int) ([]filePickerVisibleEntry, bool, bool) {
-	if len(m.entries) == 0 {
+	entries := m.filteredEntries()
+	if len(entries) == 0 {
 		return nil, false, false
 	}
-	if maxEntries <= 0 || len(m.entries) <= maxEntries {
-		visible := make([]filePickerVisibleEntry, 0, len(m.entries))
-		for idx, entry := range m.entries {
+	if maxEntries <= 0 || len(entries) <= maxEntries {
+		visible := make([]filePickerVisibleEntry, 0, len(entries))
+		for idx, entry := range entries {
 			visible = append(visible, filePickerVisibleEntry{index: idx, entry: entry})
 		}
 		return visible, false, false
@@ -218,15 +247,29 @@ func (m filePickerModel) visibleEntries(maxEntries int) ([]filePickerVisibleEntr
 		start = 0
 	}
 	end := start + maxEntries
-	if end > len(m.entries) {
-		end = len(m.entries)
+	if end > len(entries) {
+		end = len(entries)
 		start = end - maxEntries
 	}
 	visible := make([]filePickerVisibleEntry, 0, end-start)
 	for idx := start; idx < end; idx++ {
-		visible = append(visible, filePickerVisibleEntry{index: idx, entry: m.entries[idx]})
+		visible = append(visible, filePickerVisibleEntry{index: idx, entry: entries[idx]})
 	}
-	return visible, start > 0, end < len(m.entries)
+	return visible, start > 0, end < len(entries)
+}
+
+func (m filePickerModel) filteredEntries() []filePickerEntry {
+	query := strings.TrimSpace(m.filter.Value())
+	if query == "" {
+		return m.entries
+	}
+	filtered := make([]filePickerEntry, 0, len(m.entries))
+	for _, entry := range m.entries {
+		if subsequenceMatch(entry.Name, query) != nil {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
 }
 
 func (m *Model) openFilePicker() error {

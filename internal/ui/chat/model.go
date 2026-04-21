@@ -722,7 +722,7 @@ func (m *Model) peerFooterSegment() string {
 
 func (m *Model) keyHintSegment() string {
 	if m.filePicker.open {
-		return style.Muted.Render("enter select  shift+enter newline  backspace up  esc close")
+		return style.Muted.Render("type filter  up/down browse  enter select  backspace up  esc close")
 	}
 	if m.ui.focus == focusSidebar {
 		return style.Muted.Render("up/down browse  enter open  tab chat  ctrl+n add  ? help")

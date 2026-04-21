@@ -8,30 +8,32 @@ import (
 )
 
 func (m *addContactModal) updateChooserKey(msg tea.KeyMsg) tea.Cmd {
-	if msg.Type == tea.KeyEsc {
+	switch msg.Type {
+	case tea.KeyEsc:
 		return closeAddContactCmd(false)
-	}
-	if msg.Type != tea.KeyRunes {
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.moveSelection(-1, len(m.chooserItems()))
+		return nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.moveSelection(1, len(m.chooserItems()))
+		return nil
+	case tea.KeyEnter:
+		return m.activateSelectedChooserItem()
+	case tea.KeyRunes:
+		switch strings.ToLower(string(msg.Runes)) {
+		case "p":
+			m.selected = 0
+		case "l":
+			m.selected = 1
+		case "i":
+			m.selected = 2
+		default:
+			return nil
+		}
+		return m.activateSelectedChooserItem()
+	default:
 		return nil
 	}
-
-	switch strings.ToLower(string(msg.Runes)) {
-	case "p":
-		return m.setMode(addContactModePaste)
-	case "l":
-		if !m.relayConfigured() {
-			m.error = "no relay configured"
-			return nil
-		}
-		return m.setMode(addContactModeLookup)
-	case "i":
-		if !m.relayConfigured() {
-			m.error = "no relay configured"
-			return nil
-		}
-		return m.setMode(addContactModeInviteChoice)
-	}
-	return nil
 }
 
 func (m *addContactModal) updatePasteKey(msg tea.KeyMsg) tea.Cmd {
@@ -95,24 +97,30 @@ func (m *addContactModal) updateLookupKey(msg tea.KeyMsg) tea.Cmd {
 }
 
 func (m *addContactModal) updateInviteChoiceKey(msg tea.KeyMsg) tea.Cmd {
-	if msg.Type == tea.KeyEsc {
+	switch msg.Type {
+	case tea.KeyEsc:
 		return m.setMode(addContactModeChooser)
-	}
-	if msg.Type != tea.KeyRunes {
+	case tea.KeyUp, tea.KeyCtrlP:
+		m.moveSelection(-1, len(m.inviteChoiceItems()))
+		return nil
+	case tea.KeyDown, tea.KeyCtrlN:
+		m.moveSelection(1, len(m.inviteChoiceItems()))
+		return nil
+	case tea.KeyEnter:
+		return m.activateSelectedInviteChoiceItem()
+	case tea.KeyRunes:
+		switch strings.ToLower(string(msg.Runes)) {
+		case "s":
+			m.selected = 0
+		case "a":
+			m.selected = 1
+		default:
+			return nil
+		}
+		return m.activateSelectedInviteChoiceItem()
+	default:
 		return nil
 	}
-
-	switch strings.ToLower(string(msg.Runes)) {
-	case "s":
-		m.mode = addContactModeInviteStart
-		m.error = ""
-		m.value = ""
-		m.code = ""
-		return m.startInvite()
-	case "a":
-		return m.setMode(addContactModeInviteAccept)
-	}
-	return nil
 }
 
 func (m *addContactModal) updateInviteStartKey(msg tea.KeyMsg) tea.Cmd {
@@ -248,4 +256,57 @@ func (m *addContactModal) deletePasteRune() {
 	}
 	m.value = string(runes[:len(runes)-1])
 	m.error = ""
+}
+
+func (m *addContactModal) moveSelection(delta, total int) {
+	if total <= 0 {
+		m.selected = 0
+		return
+	}
+	m.selected = (m.selected + delta) % total
+	if m.selected < 0 {
+		m.selected += total
+	}
+}
+
+func (m *addContactModal) activateSelectedChooserItem() tea.Cmd {
+	items := m.chooserItems()
+	if len(items) == 0 || m.selected < 0 || m.selected >= len(items) {
+		return nil
+	}
+	item := items[m.selected]
+	if item.disabled {
+		m.error = "no relay configured"
+		return nil
+	}
+	switch item.key {
+	case "p":
+		return m.setMode(addContactModePaste)
+	case "l":
+		return m.setMode(addContactModeLookup)
+	case "i":
+		return m.setMode(addContactModeInviteChoice)
+	default:
+		return nil
+	}
+}
+
+func (m *addContactModal) activateSelectedInviteChoiceItem() tea.Cmd {
+	items := m.inviteChoiceItems()
+	if len(items) == 0 || m.selected < 0 || m.selected >= len(items) {
+		return nil
+	}
+	switch items[m.selected].key {
+	case "s":
+		m.mode = addContactModeInviteStart
+		m.selected = 0
+		m.error = ""
+		m.value = ""
+		m.code = ""
+		return m.startInvite()
+	case "a":
+		return m.setMode(addContactModeInviteAccept)
+	default:
+		return nil
+	}
 }

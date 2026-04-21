@@ -19,14 +19,15 @@ import (
 // ----------------------------------------------------------------------------
 
 var (
-	colorMuted   = lipgloss.Color("241") // secondary text, hint lines
-	colorSubtle  = lipgloss.Color("243") // tertiary text, meta
-	colorDim     = lipgloss.Color("248") // modal body text
-	colorBright  = lipgloss.Color("230") // modal titles
-	colorFaint   = lipgloss.Color("240") // dim borders
-	colorBgSel   = lipgloss.Color("238") // selection background, active-row highlight
-	colorBgModal = lipgloss.Color("234") // subtle modal inset + backdrop vignette
-	colorDivider = lipgloss.Color("60")  // sidebar divider accent
+	colorMuted     = lipgloss.Color("241") // secondary text, hint lines
+	colorSubtle    = lipgloss.Color("243") // tertiary text, meta
+	colorDim       = lipgloss.Color("248") // modal body text
+	colorBright    = lipgloss.Color("230") // modal titles
+	colorFaint     = lipgloss.Color("240") // dim borders
+	colorBgSel     = lipgloss.Color("238") // selection background, active-row highlight
+	colorBgModal   = lipgloss.Color("234") // subtle modal inset + backdrop vignette
+	colorDivider   = lipgloss.Color("60")  // sidebar divider accent
+	colorBgPalette = lipgloss.Color("236") // command palette selected row
 
 	colorOk   = lipgloss.Color("86")  // green / connected / verified / delivered
 	colorWarn = lipgloss.Color("214") // amber / reconnecting / unverified
@@ -130,11 +131,35 @@ var (
 		BorderForeground(colorInfo).
 		Background(colorBgModal)
 
+	PaletteModal = lipgloss.NewStyle().
+			BorderStyle(lipgloss.RoundedBorder()).
+			BorderForeground(colorFaint).
+			Background(colorBgModal)
+
+	PaletteInput = lipgloss.NewStyle().
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(colorFaint)
+
+	PaletteItem = lipgloss.NewStyle().
+			Padding(0, 1)
+
+	PaletteSelectedItem = lipgloss.NewStyle().
+				Background(colorBgPalette).
+				Foreground(colorBright).
+				Padding(0, 1)
+
 	InputBorder = lipgloss.NewStyle().
 			BorderStyle(lipgloss.NormalBorder()).
 			BorderForeground(colorFaint)
 
 	InputFrame = lipgloss.NewStyle()
+
+	PaletteTitle    = Bright.Bold(true)
+	PaletteMeta     = Muted
+	PaletteFooter   = Subtle
+	PaletteShortcut = Subtle
+	PaletteAccent   = StatusInfo
+	PaletteMatch    = Bright.Underline(true)
 )
 
 // ----------------------------------------------------------------------------
