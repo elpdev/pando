@@ -114,6 +114,25 @@ func (m *Model) handleIncomingChat(result *messaging.IncomingResult, envelope pr
 }
 
 func (m *Model) handleIncomingControl(result *messaging.IncomingResult) {
+	if result.RoomSync != nil {
+		if m.roomSync.requestID != "" && result.RoomSync.RequestID != m.roomSync.requestID {
+			return
+		}
+		m.roomSync.syncedCount += result.RoomSync.Added
+		if m.peer.isRoom && m.peer.mailbox == result.RoomID && result.RoomSync.Added > 0 {
+			m.loadHistory()
+		}
+		if result.RoomSync.Complete {
+			count := m.roomSync.syncedCount
+			m.clearRoomSync()
+			if count == 0 {
+				m.pushToast("no recent room history available", ToastInfo)
+			} else {
+				m.pushToast(fmt.Sprintf("synced %d room messages", count), ToastInfo)
+			}
+		}
+		return
+	}
 	if result.RoomUpdated != nil {
 		m.syncRoomContact(result.RoomUpdated)
 		if m.peer.isRoom && m.peer.mailbox == result.RoomUpdated.ID {

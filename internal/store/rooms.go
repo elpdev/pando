@@ -80,24 +80,71 @@ func (s *ClientStore) LoadRoomHistory(id *identity.Identity, roomID string) ([]R
 }
 
 func (s *ClientStore) AppendRoomHistory(id *identity.Identity, roomID string, record RoomMessageRecord) error {
+	_, err := s.MergeRoomHistory(id, roomID, []RoomMessageRecord{record})
+	return err
+}
+
+func (s *ClientStore) MergeRoomHistory(id *identity.Identity, roomID string, incoming []RoomMessageRecord) (int, error) {
 	if err := s.Ensure(); err != nil {
-		return err
+		return 0, err
 	}
 	records, err := s.LoadRoomHistory(id, roomID)
 	if err != nil {
-		return err
+		return 0, err
 	}
+	seen := make(map[string]struct{}, len(records))
 	for _, existing := range records {
-		if existing.MessageID != "" && existing.MessageID == record.MessageID {
-			return nil
+		if existing.MessageID == "" {
+			continue
 		}
+		seen[existing.MessageID] = struct{}{}
 	}
-	records = append(records, record)
+	added := 0
+	for _, record := range incoming {
+		if record.MessageID != "" {
+			if _, ok := seen[record.MessageID]; ok {
+				continue
+			}
+			seen[record.MessageID] = struct{}{}
+		}
+		records = append(records, record)
+		added++
+	}
+	if added == 0 {
+		return 0, nil
+	}
+	sort.Slice(records, func(i, j int) bool {
+		if records[i].Timestamp.Equal(records[j].Timestamp) {
+			return records[i].MessageID < records[j].MessageID
+		}
+		return records[i].Timestamp.Before(records[j].Timestamp)
+	})
 	path, err := s.roomHistoryPath(roomID)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	return writeEncryptedJSON(id, path, records, "encode room history", "encrypt room history", "write room history", true)
+	if err := writeEncryptedJSON(id, path, records, "encode room history", "encrypt room history", "write room history", true); err != nil {
+		return 0, err
+	}
+	return added, nil
+}
+
+func (s *ClientStore) LoadRoomHistoryWindow(id *identity.Identity, roomID string, since, until time.Time) ([]RoomMessageRecord, error) {
+	records, err := s.LoadRoomHistory(id, roomID)
+	if err != nil {
+		return nil, err
+	}
+	window := make([]RoomMessageRecord, 0, len(records))
+	for _, record := range records {
+		if !since.IsZero() && record.Timestamp.Before(since) {
+			continue
+		}
+		if !until.IsZero() && record.Timestamp.After(until) {
+			continue
+		}
+		window = append(window, record)
+	}
+	return window, nil
 }
 
 func (s *ClientStore) roomStatePath(roomID string) (string, error) {

@@ -15,23 +15,25 @@ import (
 )
 
 const (
-	contentKindText            = "text"
-	contentKindContactUpdate   = "contact-update"
-	contentKindAttachmentChunk = "attachment-chunk"
-	contentKindDeliveryAck     = "delivery-ack"
-	contentKindContactRequest  = "contact-request"
-	contentKindContactResponse = "contact-request-response"
-	contentKindTyping          = "typing"
-	contentKindRoomMessage     = "room-message"
-	contentKindRoomMembership  = "room-membership"
-	TypingStateActive          = "active"
-	TypingStateIdle            = "idle"
-	AttachmentTypePhoto        = "photo"
-	AttachmentTypeVoice        = "voice"
-	AttachmentTypeFile         = "file"
-	attachmentChunkSizeBytes   = 8 * 1024
-	maxAttachmentSizeBytes     = 50 * 1024 * 1024
-	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
+	contentKindText               = "text"
+	contentKindContactUpdate      = "contact-update"
+	contentKindAttachmentChunk    = "attachment-chunk"
+	contentKindDeliveryAck        = "delivery-ack"
+	contentKindContactRequest     = "contact-request"
+	contentKindContactResponse    = "contact-request-response"
+	contentKindTyping             = "typing"
+	contentKindRoomMessage        = "room-message"
+	contentKindRoomMembership     = "room-membership"
+	contentKindRoomHistoryRequest = "room-history-request"
+	contentKindRoomHistoryChunk   = "room-history-chunk"
+	TypingStateActive             = "active"
+	TypingStateIdle               = "idle"
+	AttachmentTypePhoto           = "photo"
+	AttachmentTypeVoice           = "voice"
+	AttachmentTypeFile            = "file"
+	attachmentChunkSizeBytes      = 8 * 1024
+	maxAttachmentSizeBytes        = 50 * 1024 * 1024
+	maxAttachmentChunkCount       = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
 )
 
 type deliveryAck struct {
@@ -67,17 +69,41 @@ type roomMembership struct {
 	Members   []roomMember `json:"members,omitempty"`
 }
 
+type roomHistoryRequest struct {
+	RoomID    string    `json:"room_id"`
+	RequestID string    `json:"request_id"`
+	Since     time.Time `json:"since,omitempty"`
+	Until     time.Time `json:"until,omitempty"`
+}
+
+type roomHistoryMessage struct {
+	MessageID       string    `json:"message_id"`
+	SenderAccountID string    `json:"sender_account_id"`
+	SenderMailbox   string    `json:"sender_mailbox,omitempty"`
+	Body            string    `json:"body"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+type roomHistoryChunk struct {
+	RoomID    string               `json:"room_id"`
+	RequestID string               `json:"request_id"`
+	Messages  []roomHistoryMessage `json:"messages,omitempty"`
+	Last      bool                 `json:"last,omitempty"`
+}
+
 type contentPayload struct {
-	Kind            string                  `json:"kind"`
-	Text            string                  `json:"text,omitempty"`
-	ContactUpdate   *identity.InviteBundle  `json:"contact_update,omitempty"`
-	AttachmentChunk *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
-	DeliveryAck     *deliveryAck            `json:"delivery_ack,omitempty"`
-	ContactRequest  *contactRequest         `json:"contact_request,omitempty"`
-	ContactResponse *contactRequestResponse `json:"contact_response,omitempty"`
-	Typing          *typingIndicator        `json:"typing,omitempty"`
-	RoomMessage     *roomMessage            `json:"room_message,omitempty"`
-	RoomMembership  *roomMembership         `json:"room_membership,omitempty"`
+	Kind               string                  `json:"kind"`
+	Text               string                  `json:"text,omitempty"`
+	ContactUpdate      *identity.InviteBundle  `json:"contact_update,omitempty"`
+	AttachmentChunk    *attachmentChunkPayload `json:"attachment_chunk,omitempty"`
+	DeliveryAck        *deliveryAck            `json:"delivery_ack,omitempty"`
+	ContactRequest     *contactRequest         `json:"contact_request,omitempty"`
+	ContactResponse    *contactRequestResponse `json:"contact_response,omitempty"`
+	Typing             *typingIndicator        `json:"typing,omitempty"`
+	RoomMessage        *roomMessage            `json:"room_message,omitempty"`
+	RoomMembership     *roomMembership         `json:"room_membership,omitempty"`
+	RoomHistoryRequest *roomHistoryRequest     `json:"room_history_request,omitempty"`
+	RoomHistoryChunk   *roomHistoryChunk       `json:"room_history_chunk,omitempty"`
 }
 
 type typingIndicator struct {

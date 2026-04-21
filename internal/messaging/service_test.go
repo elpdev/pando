@@ -310,6 +310,149 @@ func TestDefaultRoomRoundTrip(t *testing.T) {
 	}
 }
 
+func TestDefaultRoomHistorySyncHonorsRequesterJoinTime(t *testing.T) {
+	now := time.Now().UTC().Round(time.Second)
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	seedRoomSyncContacts(t, aliceStore, aliceService, bobStore, bobService)
+	seedRoomSyncState(t, aliceStore, aliceService.Identity(), now.Add(-10*24*time.Hour), now.Add(-24*time.Hour))
+	seedRoomSyncState(t, bobStore, bobService.Identity(), now.Add(-10*24*time.Hour), now.Add(-24*time.Hour))
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "old-join", SenderAccountID: "alice", Body: "before bob joined", Timestamp: now.Add(-48 * time.Hour)}); err != nil {
+		t.Fatalf("append old join history: %v", err)
+	}
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "recent", SenderAccountID: "alice", Body: "after bob joined", Timestamp: now.Add(-12 * time.Hour)}); err != nil {
+		t.Fatalf("append recent history: %v", err)
+	}
+
+	results := syncDefaultRoomHistory(t, aliceService, bobService)
+	if len(results) == 0 || results[len(results)-1].RoomSync == nil || !results[len(results)-1].RoomSync.Complete {
+		t.Fatalf("expected completed room sync results: %+v", results)
+	}
+	history, err := bobService.DefaultRoomHistory()
+	if err != nil {
+		t.Fatalf("load bob room history: %v", err)
+	}
+	if len(history) != 1 || history[0].MessageID != "recent" {
+		t.Fatalf("expected only post-join history, got %+v", history)
+	}
+}
+
+func TestDefaultRoomHistorySyncHonorsSevenDayLimit(t *testing.T) {
+	now := time.Now().UTC().Round(time.Second)
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	seedRoomSyncContacts(t, aliceStore, aliceService, bobStore, bobService)
+	seedRoomSyncState(t, aliceStore, aliceService.Identity(), now.Add(-14*24*time.Hour), now.Add(-10*24*time.Hour))
+	seedRoomSyncState(t, bobStore, bobService.Identity(), now.Add(-14*24*time.Hour), now.Add(-10*24*time.Hour))
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "too-old", SenderAccountID: "alice", Body: "older than seven days", Timestamp: now.Add(-8 * 24 * time.Hour)}); err != nil {
+		t.Fatalf("append too old history: %v", err)
+	}
+	if err := aliceStore.AppendRoomHistory(aliceService.Identity(), DefaultRoomID, store.RoomMessageRecord{MessageID: "within-window", SenderAccountID: "alice", Body: "within seven days", Timestamp: now.Add(-6 * 24 * time.Hour)}); err != nil {
+		t.Fatalf("append within window history: %v", err)
+	}
+
+	results := syncDefaultRoomHistory(t, aliceService, bobService)
+	if len(results) == 0 || results[len(results)-1].RoomSync == nil || !results[len(results)-1].RoomSync.Complete {
+		t.Fatalf("expected completed room sync results: %+v", results)
+	}
+	history, err := bobService.DefaultRoomHistory()
+	if err != nil {
+		t.Fatalf("load bob room history: %v", err)
+	}
+	if len(history) != 1 || history[0].MessageID != "within-window" {
+		t.Fatalf("expected only seven-day history, got %+v", history)
+	}
+}
+
+func seedRoomSyncContacts(t *testing.T, aliceStore *store.ClientStore, aliceService *Service, bobStore *store.ClientStore, bobService *Service) {
+	t.Helper()
+	aliceContact, err := identity.ContactFromInvite(aliceService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("alice invite to contact: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	if err := bobStore.SaveContact(aliceContact); err != nil {
+		t.Fatalf("save alice contact: %v", err)
+	}
+}
+
+func seedRoomSyncState(t *testing.T, clientStore *store.ClientStore, id *identity.Identity, aliceJoinedAt, bobJoinedAt time.Time) {
+	t.Helper()
+	state := &store.RoomState{
+		ID:        DefaultRoomID,
+		Name:      DefaultRoomName,
+		Joined:    true,
+		UpdatedAt: bobJoinedAt,
+		Members: []store.RoomMember{
+			{AccountID: "alice", JoinedAt: aliceJoinedAt},
+			{AccountID: "bob", JoinedAt: bobJoinedAt},
+		},
+	}
+	if id.AccountID == "alice" {
+		state.JoinedAt = aliceJoinedAt
+	} else {
+		state.JoinedAt = bobJoinedAt
+	}
+	if err := clientStore.SaveRoomState(id, state); err != nil {
+		t.Fatalf("save room state: %v", err)
+	}
+}
+
+func syncDefaultRoomHistory(t *testing.T, responder, requester *Service) []*IncomingResult {
+	t.Helper()
+	batch, requestID, err := requester.RequestDefaultRoomHistory()
+	if err != nil {
+		t.Fatalf("request default room history: %v", err)
+	}
+	if requestID == "" || batch == nil || len(batch.Envelopes) == 0 {
+		t.Fatalf("expected room history request batch, got requestID=%q batch=%+v", requestID, batch)
+	}
+	results := make([]*IncomingResult, 0)
+	responseID := 0
+	for i := range batch.Envelopes {
+		batch.Envelopes[i].ID = fmt.Sprintf("room-sync-request-%d", i)
+		result, err := responder.HandleIncoming(batch.Envelopes[i])
+		if err != nil {
+			t.Fatalf("responder handle room history request: %v", err)
+		}
+		if result == nil {
+			continue
+		}
+		for j := range result.AckEnvelopes {
+			result.AckEnvelopes[j].ID = fmt.Sprintf("room-sync-response-%d", responseID)
+			responseID++
+			chunkResult, err := requester.HandleIncoming(result.AckEnvelopes[j])
+			if err != nil {
+				t.Fatalf("requester handle room history chunk: %v", err)
+			}
+			results = append(results, chunkResult)
+		}
+	}
+	return results
+}
+
 func TestTypingIndicatorHandledAsTransientControl(t *testing.T) {
 	aliceStore := store.NewClientStore(t.TempDir())
 	aliceService, _, err := New(aliceStore, "alice")

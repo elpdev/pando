@@ -81,3 +81,30 @@ func TestEncryptedRoomRoundTrip(t *testing.T) {
 		t.Fatalf("unexpected room history: %+v", records)
 	}
 }
+
+func TestMergeRoomHistoryAndWindow(t *testing.T) {
+	clientStore := NewClientStore(t.TempDir())
+	id, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new identity: %v", err)
+	}
+	now := time.Now().UTC().Round(time.Second)
+	added, err := clientStore.MergeRoomHistory(id, "default", []RoomMessageRecord{
+		{MessageID: "msg-2", SenderAccountID: "bob", Body: "later", Timestamp: now.Add(-1 * time.Hour)},
+		{MessageID: "msg-1", SenderAccountID: "alice", Body: "earlier", Timestamp: now.Add(-2 * time.Hour)},
+		{MessageID: "msg-2", SenderAccountID: "bob", Body: "dup", Timestamp: now.Add(-1 * time.Hour)},
+	})
+	if err != nil {
+		t.Fatalf("merge room history: %v", err)
+	}
+	if added != 2 {
+		t.Fatalf("expected two room messages added, got %d", added)
+	}
+	window, err := clientStore.LoadRoomHistoryWindow(id, "default", now.Add(-90*time.Minute), now)
+	if err != nil {
+		t.Fatalf("load room history window: %v", err)
+	}
+	if len(window) != 1 || window[0].MessageID != "msg-2" {
+		t.Fatalf("unexpected room history window: %+v", window)
+	}
+}

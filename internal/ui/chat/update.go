@@ -96,9 +96,9 @@ func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 			m.syncRoomContact(state)
 			m.loadHistory()
 			m.pushToast(fmt.Sprintf("joined %s", messaging.DefaultRoomLabel()), ToastInfo)
-			return m, m.sendRoomCmd(m.peer.mailbox, "", batch)
+			return m, tea.Batch(m.sendRoomCmd(m.peer.mailbox, "", batch), m.sendRoomHistorySyncCmd())
 		}
-		return m, m.stopTypingCmd(previousRecipient)
+		return m, tea.Batch(m.stopTypingCmd(previousRecipient), m.sendRoomHistorySyncCmd())
 	}
 	if err := m.guardCanSend(); err != nil {
 		level := ToastWarn
@@ -184,6 +184,10 @@ func (m *Model) handleTypingTickMsg(msg typingTickMsg) (*Model, tea.Cmd) {
 		cmd = m.sendTypingCmd(m.typing.localPeer, messaging.TypingStateIdle)
 		m.resetLocalTypingState()
 	}
+	if m.roomSync.active && !m.roomSync.startedAt.IsZero() && now.Sub(m.roomSync.startedAt) >= 10*time.Second {
+		m.clearRoomSync()
+		m.pushToast("room history sync timed out", ToastWarn)
+	}
 	return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
 }
 
@@ -225,6 +229,23 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 func (m *Model) handleTypingSendResultMsg(msg typingSendResultMsg) (*Model, tea.Cmd) {
 	if msg.err != nil {
 		m.pushToast(fmt.Sprintf("typing indicator failed: %v", msg.err), ToastBad)
+	}
+	return m, nil
+}
+
+func (m *Model) handleRoomHistorySyncResultMsg(msg roomHistorySyncResultMsg) (*Model, tea.Cmd) {
+	if msg.err != nil {
+		m.clearRoomSync()
+		m.pushToast(fmt.Sprintf("room history sync failed: %v", msg.err), ToastBad)
+		return m, nil
+	}
+	if msg.skipped != "" {
+		m.clearRoomSync()
+		m.pushToast(msg.skipped, ToastInfo)
+		return m, nil
+	}
+	if msg.requestID != "" {
+		m.pushToast("syncing recent room history...", ToastInfo)
 	}
 	return m, nil
 }

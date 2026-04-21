@@ -49,6 +49,14 @@ type typingState struct {
 	localAt       time.Time
 }
 
+type roomSyncState struct {
+	active          bool
+	requestID       string
+	startedAt       time.Time
+	lastRequestedAt time.Time
+	syncedCount     int
+}
+
 type uiState struct {
 	width        int
 	height       int

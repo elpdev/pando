@@ -45,6 +45,10 @@ func (s *Service) handleIncomingPayload(contact *identity.Contact, payload *cont
 		return s.handleRoomMessage(contact, payload)
 	case contentKindRoomMembership:
 		return s.handleRoomMembership(contact, payload)
+	case contentKindRoomHistoryRequest:
+		return s.handleRoomHistoryRequest(contact, payload)
+	case contentKindRoomHistoryChunk:
+		return s.handleRoomHistoryChunk(contact, payload)
 	default:
 		return nil, nil
 	}

@@ -122,6 +122,11 @@ type connectResultMsg struct{ err error }
 type reconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
+type roomHistorySyncResultMsg struct {
+	requestID string
+	err       error
+	skipped   string
+}
 type filePickerClosedMsg struct{}
 type filePickerErrorMsg struct{ err error }
 type filePickerSelectedMsg struct{ path string }

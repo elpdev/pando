@@ -36,6 +36,7 @@ type IncomingResult struct {
 	ContactChange  ContactUpdateChange
 	ContactRequest *store.ContactRequest
 	RoomUpdated    *store.RoomState
+	RoomSync       *RoomSyncUpdate
 
 	// TypingState and TypingExpiresAt are set only for typing control messages.
 	TypingState     string
@@ -55,6 +56,12 @@ const (
 type OutgoingBatch struct {
 	MessageID string
 	Envelopes []protocol.Envelope
+}
+
+type RoomSyncUpdate struct {
+	RequestID string
+	Added     int
+	Complete  bool
 }
 
 type Service struct {
