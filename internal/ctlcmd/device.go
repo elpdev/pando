@@ -6,7 +6,6 @@ import (
 	"os"
 
 	"github.com/elpdev/pando/internal/identity"
-	"github.com/elpdev/pando/internal/store"
 )
 
 func runDevice(args []string) error {
@@ -54,7 +53,10 @@ func runListDevices(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(dataDir)
+	clientStore, err := prepareClientStore(mailbox, dataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -80,7 +82,10 @@ func runCreateEnrollment(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	if err := clientStore.SavePendingEnrollment(pending); err != nil {
 		return err
 	}
@@ -101,7 +106,10 @@ func runApproveEnrollment(args []string) error {
 	if *requestPath == "" {
 		return fmt.Errorf("-request is required")
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -137,7 +145,10 @@ func runCompleteEnrollment(args []string) error {
 	if *approvalPath == "" {
 		return fmt.Errorf("-approval is required")
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	pending, err := clientStore.LoadPendingEnrollment()
 	if err != nil {
 		return err
@@ -180,7 +191,10 @@ func runRevokeDevice(args []string) error {
 	if *deviceID == "" {
 		return fmt.Errorf("-device is required")
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err

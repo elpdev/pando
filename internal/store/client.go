@@ -12,13 +12,107 @@ import (
 )
 
 var ErrNotFound = errors.New("not found")
+var ErrPassphraseRequired = errors.New("passphrase required")
+var ErrInvalidPassphrase = errors.New("invalid passphrase")
+
+type ProtectionState string
+
+const (
+	ProtectionStateNew       ProtectionState = "new"
+	ProtectionStatePlaintext ProtectionState = "plaintext"
+	ProtectionStateEncrypted ProtectionState = "encrypted"
+	ProtectionStateMixed     ProtectionState = "mixed"
+)
 
 type ClientStore struct {
-	dir string
+	dir        string
+	passphrase []byte
 }
 
 func NewClientStore(dir string) *ClientStore {
 	return &ClientStore{dir: dir}
+}
+
+func (s *ClientStore) ProtectionState() (ProtectionState, error) {
+	plain, encrypted, err := s.protectedFileCounts()
+	if err != nil {
+		return "", err
+	}
+	switch {
+	case plain == 0 && encrypted == 0:
+		return ProtectionStateNew, nil
+	case plain > 0 && encrypted > 0:
+		return ProtectionStateMixed, nil
+	case encrypted > 0:
+		return ProtectionStateEncrypted, nil
+	default:
+		return ProtectionStatePlaintext, nil
+	}
+}
+
+func (s *ClientStore) UsePassphrase(passphrase []byte) error {
+	if len(passphrase) == 0 {
+		return fmt.Errorf("passphrase is required")
+	}
+	state, err := s.ProtectionState()
+	if err != nil {
+		return err
+	}
+	if state == ProtectionStateEncrypted || state == ProtectionStateMixed {
+		if err := s.validatePassphrase(passphrase); err != nil {
+			return err
+		}
+	}
+	s.passphrase = append([]byte(nil), passphrase...)
+	if state == ProtectionStatePlaintext || state == ProtectionStateMixed {
+		if err := s.migrateProtectedFiles(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *ClientStore) ChangePassphrase(passphrase []byte) error {
+	if len(s.passphrase) == 0 {
+		return ErrPassphraseRequired
+	}
+	if len(passphrase) == 0 {
+		return fmt.Errorf("passphrase is required")
+	}
+	state, err := s.ProtectionState()
+	if err != nil {
+		return err
+	}
+	if state == ProtectionStatePlaintext || state == ProtectionStateMixed {
+		return fmt.Errorf("store must be migrated before changing passphrase")
+	}
+	oldPassphrase := append([]byte(nil), s.passphrase...)
+	identityBytes, err := s.readProtectedFileBytes(s.identityPath())
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	contactsBytes, err := s.readProtectedFileBytes(s.contactsPath())
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	pendingBytes, err := s.readProtectedFileBytes(s.pendingEnrollmentPath())
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return err
+	}
+	s.passphrase = append([]byte(nil), passphrase...)
+	if err := s.rewriteProtectedFileBytes(s.identityPath(), identityBytes); err != nil {
+		s.passphrase = oldPassphrase
+		return err
+	}
+	if err := s.rewriteProtectedFileBytes(s.contactsPath(), contactsBytes); err != nil {
+		s.passphrase = oldPassphrase
+		return err
+	}
+	if err := s.rewriteProtectedFileBytes(s.pendingEnrollmentPath(), pendingBytes); err != nil {
+		s.passphrase = oldPassphrase
+		return err
+	}
+	return nil
 }
 
 func (s *ClientStore) Ensure() error {
@@ -27,7 +121,7 @@ func (s *ClientStore) Ensure() error {
 
 func (s *ClientStore) LoadIdentity() (*identity.Identity, error) {
 	var id identity.Identity
-	if err := s.readJSON(s.identityPath(), &id); err != nil {
+	if err := s.readProtectedJSON(s.identityPath(), &id); err != nil {
 		return nil, err
 	}
 	return &id, nil
@@ -59,7 +153,7 @@ func (s *ClientStore) SaveIdentity(id *identity.Identity) error {
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	return s.writeJSON(s.identityPath(), id, 0o600)
+	return s.writeProtectedJSON(s.identityPath(), id, 0o600)
 }
 
 func (s *ClientStore) SaveContact(contact *identity.Contact) error {
@@ -72,7 +166,7 @@ func (s *ClientStore) SaveContact(contact *identity.Contact) error {
 		return err
 	}
 	contacts[contact.AccountID] = *contact
-	return s.writeJSON(s.contactsPath(), contacts, 0o600)
+	return s.writeProtectedJSON(s.contactsPath(), contacts, 0o600)
 }
 
 func (s *ClientStore) LoadContact(mailbox string) (*identity.Contact, error) {
@@ -119,7 +213,7 @@ func (s *ClientStore) MarkContactVerified(mailbox string, verified bool) (*ident
 		contact.TrustSource = identity.TrustSourceUnverified
 	}
 	contacts[mailbox] = contact
-	if err := s.writeJSON(s.contactsPath(), contacts, 0o600); err != nil {
+	if err := s.writeProtectedJSON(s.contactsPath(), contacts, 0o600); err != nil {
 		return nil, err
 	}
 	copyContact := contact
@@ -145,12 +239,12 @@ func (s *ClientStore) SavePendingEnrollment(pending *identity.PendingEnrollment)
 	if err := s.Ensure(); err != nil {
 		return err
 	}
-	return s.writeJSON(s.pendingEnrollmentPath(), pending, 0o600)
+	return s.writeProtectedJSON(s.pendingEnrollmentPath(), pending, 0o600)
 }
 
 func (s *ClientStore) LoadPendingEnrollment() (*identity.PendingEnrollment, error) {
 	var pending identity.PendingEnrollment
-	if err := s.readJSON(s.pendingEnrollmentPath(), &pending); err != nil {
+	if err := s.readProtectedJSON(s.pendingEnrollmentPath(), &pending); err != nil {
 		return nil, err
 	}
 	return &pending, nil
@@ -181,7 +275,7 @@ func (s *ClientStore) pendingEnrollmentPath() string {
 
 func (s *ClientStore) loadContactsMap() (map[string]identity.Contact, error) {
 	contacts := make(map[string]identity.Contact)
-	err := s.readJSON(s.contactsPath(), &contacts)
+	err := s.readProtectedJSON(s.contactsPath(), &contacts)
 	if err == nil {
 		return contacts, nil
 	}
@@ -211,6 +305,90 @@ func (s *ClientStore) writeJSON(path string, value any, mode os.FileMode) error 
 		return fmt.Errorf("encode %s: %w", path, err)
 	}
 	if err := os.WriteFile(path, bytes, mode); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *ClientStore) readProtectedJSON(path string, target any) error {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ErrNotFound
+		}
+		return fmt.Errorf("read %s: %w", path, err)
+	}
+	if isProtectedEnvelope(bytes) {
+		if len(s.passphrase) == 0 {
+			return ErrPassphraseRequired
+		}
+		plaintext, err := decryptProtectedPayload(s.passphrase, bytes)
+		if err != nil {
+			return fmt.Errorf("decrypt %s: %w", path, err)
+		}
+		if err := json.Unmarshal(plaintext, target); err != nil {
+			return fmt.Errorf("decode %s: %w", path, err)
+		}
+		return nil
+	}
+	if err := json.Unmarshal(bytes, target); err != nil {
+		return fmt.Errorf("decode %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *ClientStore) writeProtectedJSON(path string, value any, mode os.FileMode) error {
+	plaintext, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode %s: %w", path, err)
+	}
+	bytes := plaintext
+	if len(s.passphrase) > 0 {
+		bytes, err = encryptProtectedPayload(s.passphrase, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt %s: %w", path, err)
+		}
+	}
+	if err := os.WriteFile(path, bytes, mode); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *ClientStore) readProtectedFileBytes(path string) ([]byte, error) {
+	bytes, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("read %s: %w", path, err)
+	}
+	if isProtectedEnvelope(bytes) {
+		if len(s.passphrase) == 0 {
+			return nil, ErrPassphraseRequired
+		}
+		plaintext, err := decryptProtectedPayload(s.passphrase, bytes)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt %s: %w", path, err)
+		}
+		return plaintext, nil
+	}
+	return bytes, nil
+}
+
+func (s *ClientStore) rewriteProtectedFileBytes(path string, plaintext []byte) error {
+	if plaintext == nil {
+		return nil
+	}
+	bytes := plaintext
+	var err error
+	if len(s.passphrase) > 0 {
+		bytes, err = encryptProtectedPayload(s.passphrase, plaintext)
+		if err != nil {
+			return fmt.Errorf("encrypt %s: %w", path, err)
+		}
+	}
+	if err := os.WriteFile(path, bytes, 0o600); err != nil {
 		return fmt.Errorf("write %s: %w", path, err)
 	}
 	return nil

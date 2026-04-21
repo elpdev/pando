@@ -28,6 +28,8 @@ import (
 	"rsc.io/qr"
 )
 
+const testPassphrase = "test-passphrase"
+
 func TestEjectForce(t *testing.T) {
 	dataDir := t.TempDir()
 	mailbox := "alice"
@@ -156,6 +158,7 @@ func TestDecodeInviteTextAcceptsVerboseInviteOutput(t *testing.T) {
 }
 
 func TestRunImportContactWithStdin(t *testing.T) {
+	withTestPassphrase(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
 	aliceStore := store.NewClientStore(aliceDir)
@@ -167,6 +170,8 @@ func TestRunImportContactWithStdin(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
@@ -191,6 +196,7 @@ func TestRunImportContactWithStdin(t *testing.T) {
 }
 
 func TestRunImportContactWithPaste(t *testing.T) {
+	withTestPassphrase(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
 	aliceStore := store.NewClientStore(aliceDir)
@@ -202,6 +208,8 @@ func TestRunImportContactWithPaste(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
@@ -220,6 +228,7 @@ func TestRunImportContactWithPaste(t *testing.T) {
 }
 
 func TestRunImportContactLeavesContactUnverified(t *testing.T) {
+	withTestPassphrase(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
 	aliceStore := store.NewClientStore(aliceDir)
@@ -231,6 +240,8 @@ func TestRunImportContactLeavesContactUnverified(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
@@ -252,6 +263,7 @@ func TestRunImportContactLeavesContactUnverified(t *testing.T) {
 }
 
 func TestRunAddContactOutputShowsVerification(t *testing.T) {
+	withTestPassphrase(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
 	aliceStore := store.NewClientStore(aliceDir)
@@ -263,6 +275,8 @@ func TestRunAddContactOutputShowsVerification(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	code, err := invite.EncodeCode(aliceID.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
@@ -284,12 +298,14 @@ func TestRunAddContactOutputShowsVerification(t *testing.T) {
 }
 
 func TestRunInviteCodeRaw(t *testing.T) {
+	withTestPassphrase(t)
 	dataDir := t.TempDir()
 	clientStore := store.NewClientStore(dataDir)
 	id, _, err := clientStore.LoadOrCreateIdentity("alice")
 	if err != nil {
 		t.Fatalf("create alice identity: %v", err)
 	}
+	protectTestStore(t, clientStore)
 	code, err := invite.EncodeCode(id.InviteBundle())
 	if err != nil {
 		t.Fatalf("encode invite code: %v", err)
@@ -306,11 +322,13 @@ func TestRunInviteCodeRaw(t *testing.T) {
 }
 
 func TestRunInviteCodeDefaultShowsNextStep(t *testing.T) {
+	withTestPassphrase(t)
 	dataDir := t.TempDir()
 	clientStore := store.NewClientStore(dataDir)
 	if _, _, err := clientStore.LoadOrCreateIdentity("alice"); err != nil {
 		t.Fatalf("create alice identity: %v", err)
 	}
+	protectTestStore(t, clientStore)
 
 	output := captureStdout(t, func() {
 		if err := runInviteCode([]string{"-mailbox", "alice", "-data-dir", dataDir}); err != nil {
@@ -323,6 +341,7 @@ func TestRunInviteCodeDefaultShowsNextStep(t *testing.T) {
 }
 
 func TestExecuteGroupedIdentityInit(t *testing.T) {
+	withTestPassphrase(t)
 	dataDir := t.TempDir()
 	output := captureStdout(t, func() {
 		if err := Execute([]string{"identity", "init", "-mailbox", "alice", "-data-dir", dataDir}); err != nil {
@@ -335,6 +354,7 @@ func TestExecuteGroupedIdentityInit(t *testing.T) {
 }
 
 func TestIdentityInitCanPublishDirectoryEntry(t *testing.T) {
+	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)
 	dataDir := t.TempDir()
 	output := captureStdout(t, func() {
@@ -355,6 +375,32 @@ func TestIdentityInitCanPublishDirectoryEntry(t *testing.T) {
 	}
 	if entry.Entry.Mailbox != "alice" {
 		t.Fatalf("expected alice directory entry, got %+v", entry)
+	}
+}
+
+func TestRunChangePassphraseUsesNewEnvironmentVariable(t *testing.T) {
+	withTestPassphrase(t)
+	dataDir := t.TempDir()
+	clientStore := store.NewClientStore(dataDir)
+	if _, _, err := clientStore.LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	protectTestStore(t, clientStore)
+	t.Setenv("PANDO_PASSPHRASE_NEW", "rotated-passphrase")
+	output := captureStdout(t, func() {
+		if err := runChangePassphrase([]string{"-mailbox", "alice", "-data-dir", dataDir}); err != nil {
+			t.Fatalf("run change passphrase: %v", err)
+		}
+	})
+	if !strings.Contains(output, "updated passphrase for alice") {
+		t.Fatalf("expected passphrase change output, got %q", output)
+	}
+	reopened := store.NewClientStore(dataDir)
+	if err := reopened.UsePassphrase([]byte("rotated-passphrase")); err != nil {
+		t.Fatalf("unlock store with rotated passphrase: %v", err)
+	}
+	if _, err := reopened.LoadIdentity(); err != nil {
+		t.Fatalf("load identity after passphrase rotation: %v", err)
 	}
 }
 
@@ -442,6 +488,7 @@ func TestRunConfigSetRelayTokenAndShow(t *testing.T) {
 }
 
 func TestPublishDirectoryAndLookupContact(t *testing.T) {
+	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
@@ -453,6 +500,8 @@ func TestPublishDirectoryAndLookupContact(t *testing.T) {
 	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
 		t.Fatalf("publish directory: %v", err)
 	}
@@ -472,15 +521,20 @@ func TestPublishDirectoryAndLookupContact(t *testing.T) {
 }
 
 func TestDiscoverContactsListsOnlyDiscoverableEntries(t *testing.T) {
+	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
-	if _, _, err := store.NewClientStore(aliceDir).LoadOrCreateIdentity("alice"); err != nil {
+	aliceStore := store.NewClientStore(aliceDir)
+	if _, _, err := aliceStore.LoadOrCreateIdentity("alice"); err != nil {
 		t.Fatalf("create alice identity: %v", err)
 	}
-	if _, _, err := store.NewClientStore(bobDir).LoadOrCreateIdentity("bob"); err != nil {
+	bobStore := store.NewClientStore(bobDir)
+	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
 		t.Fatalf("publish discoverable alice directory: %v", err)
 	}
@@ -504,15 +558,20 @@ func TestDiscoverContactsListsOnlyDiscoverableEntries(t *testing.T) {
 }
 
 func TestRequestAcceptAndRejectContactFlow(t *testing.T) {
+	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
-	if _, _, err := store.NewClientStore(aliceDir).LoadOrCreateIdentity("alice"); err != nil {
+	aliceStore := store.NewClientStore(aliceDir)
+	if _, _, err := aliceStore.LoadOrCreateIdentity("alice"); err != nil {
 		t.Fatalf("create alice identity: %v", err)
 	}
-	if _, _, err := store.NewClientStore(bobDir).LoadOrCreateIdentity("bob"); err != nil {
+	bobStore := store.NewClientStore(bobDir)
+	if _, _, err := bobStore.LoadOrCreateIdentity("bob"); err != nil {
 		t.Fatalf("create bob identity: %v", err)
 	}
+	protectTestStore(t, aliceStore)
+	protectTestStore(t, bobStore)
 	if err := runPublishDirectory([]string{"-mailbox", "alice", "-data-dir", aliceDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
 		t.Fatalf("publish discoverable alice directory: %v", err)
 	}
@@ -541,7 +600,7 @@ func TestRequestAcceptAndRejectContactFlow(t *testing.T) {
 	if aliceResult.ContactRequest == nil || aliceResult.ContactRequest.Status != store.ContactRequestStatusAccepted {
 		t.Fatalf("unexpected alice accepted request result: %+v", aliceResult)
 	}
-	aliceContact, err := store.NewClientStore(aliceDir).LoadContact("bob")
+	aliceContact, err := unlockedTestStore(t, aliceDir).LoadContact("bob")
 	if err != nil {
 		t.Fatalf("load accepted bob contact: %v", err)
 	}
@@ -550,9 +609,11 @@ func TestRequestAcceptAndRejectContactFlow(t *testing.T) {
 	}
 
 	carolDir := t.TempDir()
-	if _, _, err := store.NewClientStore(carolDir).LoadOrCreateIdentity("carol"); err != nil {
+	carolStore := store.NewClientStore(carolDir)
+	if _, _, err := carolStore.LoadOrCreateIdentity("carol"); err != nil {
 		t.Fatalf("create carol identity: %v", err)
 	}
+	protectTestStore(t, carolStore)
 	if err := runPublishDirectory([]string{"-mailbox", "carol", "-data-dir", carolDir, "-relay", serverURL, "-relay-token", "secret", "-discoverable"}); err != nil {
 		t.Fatalf("publish discoverable carol directory: %v", err)
 	}
@@ -570,12 +631,13 @@ func TestRequestAcceptAndRejectContactFlow(t *testing.T) {
 	if aliceRejectResult.ContactRequest == nil || aliceRejectResult.ContactRequest.Status != store.ContactRequestStatusRejected {
 		t.Fatalf("unexpected alice rejected request result: %+v", aliceRejectResult)
 	}
-	if _, err := store.NewClientStore(aliceDir).LoadContact("carol"); err != store.ErrNotFound {
+	if _, err := unlockedTestStore(t, aliceDir).LoadContact("carol"); err != store.ErrNotFound {
 		t.Fatalf("expected no carol contact after rejection, got %v", err)
 	}
 }
 
 func TestContactInviteExchangeAddsTrustedContacts(t *testing.T) {
+	withTestPassphrase(t)
 	serverURL := newRelayTestServer(t)
 	aliceDir := t.TempDir()
 	bobDir := t.TempDir()
@@ -590,11 +652,11 @@ func TestContactInviteExchangeAddsTrustedContacts(t *testing.T) {
 	if err := <-errs; err != nil {
 		t.Fatalf("start invite: %v", err)
 	}
-	aliceContact, err := store.NewClientStore(aliceDir).LoadContact("bob")
+	aliceContact, err := unlockedTestStore(t, aliceDir).LoadContact("bob")
 	if err != nil {
 		t.Fatalf("load alice contact: %v", err)
 	}
-	bobContact, err := store.NewClientStore(bobDir).LoadContact("alice")
+	bobContact, err := unlockedTestStore(t, bobDir).LoadContact("alice")
 	if err != nil {
 		t.Fatalf("load bob contact: %v", err)
 	}
@@ -655,6 +717,7 @@ func captureStdout(t *testing.T, fn func()) string {
 func receiveNextControlResult(t *testing.T, serverURL, dataDir, mailbox string) *messaging.IncomingResult {
 	t.Helper()
 	clientStore := store.NewClientStore(dataDir)
+	protectTestStore(t, clientStore)
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		t.Fatalf("new messaging service for %s: %v", mailbox, err)
@@ -692,4 +755,23 @@ func receiveNextControlResult(t *testing.T, serverURL, dataDir, mailbox string) 
 			t.Fatalf("timed out waiting for control result for %s", mailbox)
 		}
 	}
+}
+
+func withTestPassphrase(t *testing.T) {
+	t.Helper()
+	t.Setenv("PANDO_PASSPHRASE", testPassphrase)
+}
+
+func protectTestStore(t *testing.T, clientStore *store.ClientStore) {
+	t.Helper()
+	if err := clientStore.UsePassphrase([]byte(testPassphrase)); err != nil {
+		t.Fatalf("protect test store: %v", err)
+	}
+}
+
+func unlockedTestStore(t *testing.T, dataDir string) *store.ClientStore {
+	t.Helper()
+	clientStore := store.NewClientStore(dataDir)
+	protectTestStore(t, clientStore)
+	return clientStore
 }

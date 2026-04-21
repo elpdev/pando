@@ -9,7 +9,6 @@ import (
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/relayapi"
-	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
@@ -77,7 +76,10 @@ func runImportContactWithName(name string, args []string) error {
 	if err := validateInviteInputFlags(*invitePath, *inviteCode, *readStdin, *readPaste, *fromClipboard, *qrImagePath); err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
@@ -116,7 +118,10 @@ func runListContacts(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(dataDir)
+	clientStore, err := prepareClientStore(mailbox, dataDir)
+	if err != nil {
+		return err
+	}
 	_, _, err = clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -150,14 +155,17 @@ func runShowContact(args []string) error {
 	if err := bfs.Parse(args); err != nil {
 		return err
 	}
-	_, resolvedDataDir, err := bfs.Resolve()
+	mailbox, resolvedDataDir, err := bfs.Resolve()
 	if err != nil {
 		return err
 	}
 	if *contactMailbox == "" {
 		return fmt.Errorf("-contact is required")
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	contact, err := clientStore.LoadContact(*contactMailbox)
 	if err != nil {
 		return err
@@ -178,14 +186,17 @@ func runVerifyContact(args []string) error {
 	if err := bfs.Parse(args); err != nil {
 		return err
 	}
-	_, resolvedDataDir, err := bfs.Resolve()
+	mailbox, resolvedDataDir, err := bfs.Resolve()
 	if err != nil {
 		return err
 	}
 	if *contactMailbox == "" {
 		return fmt.Errorf("-contact is required")
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	contact, err := clientStore.LoadContact(*contactMailbox)
 	if err != nil {
 		return err
@@ -217,7 +228,10 @@ func runPublishDirectory(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	id, _, err := clientStore.LoadOrCreateIdentity(mailbox)
 	if err != nil {
 		return err
@@ -270,7 +284,10 @@ func runLookupContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err

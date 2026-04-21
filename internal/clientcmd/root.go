@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/messaging"
+	"github.com/elpdev/pando/internal/passphrase"
 	"github.com/elpdev/pando/internal/relayapi"
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport/ws"
@@ -59,6 +60,9 @@ func Execute(args []string) error {
 	style.Apply(style.ResolveTheme(devCfg.Theme))
 
 	clientStore := store.NewClientStore(cfg.DataDir)
+	if err := passphrase.PrepareClientStore(clientStore, cfg.Mailbox); err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, cfg.Mailbox)
 	if err != nil {
 		return err

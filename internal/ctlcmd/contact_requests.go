@@ -84,7 +84,10 @@ func runRequestContact(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
@@ -123,7 +126,10 @@ func runListContactRequests(args []string) error {
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
@@ -187,7 +193,10 @@ func runResolveContactRequest(name string, args []string, decision string) error
 	if err != nil {
 		return err
 	}
-	clientStore := store.NewClientStore(resolvedDataDir)
+	clientStore, err := prepareClientStore(mailbox, resolvedDataDir)
+	if err != nil {
+		return err
+	}
 	service, _, err := messaging.New(clientStore, mailbox)
 	if err != nil {
 		return err
