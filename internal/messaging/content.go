@@ -16,25 +16,21 @@ import (
 )
 
 const (
-	contentKindText               = "text"
-	contentKindContactUpdate      = "contact-update"
-	contentKindAttachmentChunk    = "attachment-chunk"
-	contentKindDeliveryAck        = "delivery-ack"
-	contentKindContactRequest     = "contact-request"
-	contentKindContactResponse    = "contact-request-response"
-	contentKindTyping             = "typing"
-	contentKindRoomMessage        = "room-message"
-	contentKindRoomMembership     = "room-membership"
-	contentKindRoomHistoryRequest = "room-history-request"
-	contentKindRoomHistoryChunk   = "room-history-chunk"
-	TypingStateActive             = "active"
-	TypingStateIdle               = "idle"
-	AttachmentTypePhoto           = "photo"
-	AttachmentTypeVoice           = "voice"
-	AttachmentTypeFile            = "file"
-	attachmentChunkSizeBytes      = 8 * 1024
-	maxAttachmentSizeBytes        = 50 * 1024 * 1024
-	maxAttachmentChunkCount       = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
+	contentKindText            = "text"
+	contentKindContactUpdate   = "contact-update"
+	contentKindAttachmentChunk = "attachment-chunk"
+	contentKindDeliveryAck     = "delivery-ack"
+	contentKindContactRequest  = "contact-request"
+	contentKindContactResponse = "contact-request-response"
+	contentKindTyping          = "typing"
+	TypingStateActive          = "active"
+	TypingStateIdle            = "idle"
+	AttachmentTypePhoto        = "photo"
+	AttachmentTypeVoice        = "voice"
+	AttachmentTypeFile         = "file"
+	attachmentChunkSizeBytes   = 8 * 1024
+	maxAttachmentSizeBytes     = 50 * 1024 * 1024
+	maxAttachmentChunkCount    = maxAttachmentSizeBytes/attachmentChunkSizeBytes + 1
 )
 
 type deliveryAck struct {
@@ -50,46 +46,6 @@ type contactRequest struct {
 type contactRequestResponse struct {
 	Decision string                 `json:"decision"`
 	Bundle   *identity.InviteBundle `json:"bundle,omitempty"`
-}
-
-type roomMessage struct {
-	RoomID          string `json:"room_id"`
-	MessageID       string `json:"message_id"`
-	SenderAccountID string `json:"sender_account_id"`
-	Body            string `json:"body"`
-}
-
-type roomMember struct {
-	AccountID string    `json:"account_id"`
-	JoinedAt  time.Time `json:"joined_at"`
-}
-
-type roomMembership struct {
-	RoomID    string       `json:"room_id"`
-	UpdatedAt time.Time    `json:"updated_at,omitempty"`
-	Members   []roomMember `json:"members,omitempty"`
-}
-
-type roomHistoryRequest struct {
-	RoomID    string    `json:"room_id"`
-	RequestID string    `json:"request_id"`
-	Since     time.Time `json:"since,omitempty"`
-	Until     time.Time `json:"until,omitempty"`
-}
-
-type roomHistoryMessage struct {
-	MessageID       string    `json:"message_id"`
-	SenderAccountID string    `json:"sender_account_id"`
-	SenderMailbox   string    `json:"sender_mailbox,omitempty"`
-	Body            string    `json:"body"`
-	Timestamp       time.Time `json:"timestamp"`
-}
-
-type roomHistoryChunk struct {
-	RoomID    string               `json:"room_id"`
-	RequestID string               `json:"request_id"`
-	Messages  []roomHistoryMessage `json:"messages,omitempty"`
-	Last      bool                 `json:"last,omitempty"`
 }
 
 type contentPayload struct {
