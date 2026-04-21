@@ -324,11 +324,12 @@ func (m *Model) PeerLabel() string {
 
 func (m *Model) FooterSegments() []string {
 	segments := []string{m.connectionFooterSegment()}
-	if peer := m.peerFooterSegment(); peer != "" {
-		segments = append(segments, peer)
-	}
 	if typing := m.typingFooterSegment(); typing != "" {
 		segments = append(segments, typing)
+		return segments
+	}
+	if peer := m.peerFooterSegment(); peer != "" {
+		segments = append(segments, peer)
 	}
 	segments = append(segments, m.keyHintSegment())
 	return segments

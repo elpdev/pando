@@ -1290,6 +1290,9 @@ func TestTypingIndicatorRendersAnimatesAndExpires(t *testing.T) {
 	if !strings.Contains(footer, "bob is typing") {
 		t.Fatalf("expected typing indicator in footer: %q", footer)
 	}
+	if strings.Contains(footer, "enter send") {
+		t.Fatalf("expected typing indicator to take priority over key hints: %q", footer)
+	}
 
 	_, _ = model.Update(typingTickMsg(time.Now().UTC().Add(typingAnimationInterval)))
 	footer = strings.Join(model.FooterSegments(), "    ")
