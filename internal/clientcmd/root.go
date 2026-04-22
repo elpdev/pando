@@ -19,6 +19,7 @@ import (
 	"github.com/elpdev/pando/internal/store"
 	"github.com/elpdev/pando/internal/transport/ws"
 	"github.com/elpdev/pando/internal/ui"
+	"github.com/elpdev/pando/internal/ui/audio"
 	"github.com/elpdev/pando/internal/ui/chat"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -89,6 +90,8 @@ func Execute(args []string) error {
 	chatModel := chat.New(chat.Deps{
 		Client:           client,
 		Messaging:        service,
+		VoicePlayer:      audio.NewPlayer(),
+		VoiceRecorder:    audio.NewRecorder(),
 		Mailbox:          cfg.Mailbox,
 		RecipientMailbox: cfg.RecipientMailbox,
 		RelayURL:         cfg.RelayURL,

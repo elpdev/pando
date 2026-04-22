@@ -76,6 +76,9 @@ func (m *Model) keyHintSegment() string {
 	if m.ui.focus == focusSidebar {
 		return style.Muted.Render("up/down browse  enter open  ctrl+p commands  tab chat  ? help")
 	}
+	if m.recording.active {
+		return style.Muted.Render("enter stop recording  esc cancel recording  ctrl+p commands  tab sidebar  ? help")
+	}
 	hints := []string{"enter send", "shift+enter newline", "ctrl+p commands", "tab sidebar", "? help"}
 	if m.pending != nil {
 		hints = append([]string{"esc clear attachment"}, hints...)

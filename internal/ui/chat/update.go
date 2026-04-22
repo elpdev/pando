@@ -15,6 +15,9 @@ func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
 		return m, m.openPaletteAtHelp()
 	}
+	if msg.Type == tea.KeyEsc && m.recording.active && m.ui.focus == focusChat {
+		return m, m.cancelVoiceRecordingCmd()
+	}
 	if msg.Type == tea.KeyEsc && m.pending != nil && m.ui.focus == focusChat {
 		m.clearPendingAttachment()
 		return m, nil
@@ -116,6 +119,9 @@ func (m *Model) handleAttachKey() tea.Cmd {
 
 func (m *Model) handleEnterKey() (*Model, tea.Cmd) {
 	body := strings.TrimSpace(m.input.Value())
+	if body == "" && m.recording.active {
+		return m, m.stopVoiceRecordingCmd()
+	}
 	if body == "" && m.pending != nil {
 		if err := m.guardCanSend(); err != nil {
 			level := ToastWarn

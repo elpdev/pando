@@ -15,7 +15,7 @@ type helpShortcut struct {
 
 var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts or draft history"}, {"pgup / pgdn", "scroll messages"}, {"home / end", "jump transcript top/bottom"}, {"tab", "switch pane"}, {"ctrl+c", "quit"}}
 
-var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+p", "open command palette"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "back / close overlay"}, {"?", "toggle this help"}}
+var helpSectionMessaging = []helpShortcut{{"enter", "send / stop active recording"}, {"shift+enter", "insert newline"}, {"ctrl+p", "open command palette"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "cancel recording / back / clear"}, {"?", "toggle this help"}}
 
 type helpView struct{}
 

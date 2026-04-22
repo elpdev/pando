@@ -87,6 +87,57 @@ func (p *fakeVoicePlayer) Close() error {
 
 func (p *fakeVoicePlayer) IsPlaying() bool { return p.playing }
 
+type fakeVoiceRecorder struct {
+	started   int
+	stopped   int
+	canceled  int
+	closed    bool
+	recording bool
+	startErr  error
+	stopErr   error
+	cancelErr error
+	closeErr  error
+	stopPath  string
+}
+
+func (r *fakeVoiceRecorder) Start() error {
+	if r.startErr != nil {
+		return r.startErr
+	}
+	r.started++
+	r.recording = true
+	return nil
+}
+
+func (r *fakeVoiceRecorder) Stop() (string, error) {
+	if r.stopErr != nil {
+		return "", r.stopErr
+	}
+	r.stopped++
+	r.recording = false
+	return r.stopPath, nil
+}
+
+func (r *fakeVoiceRecorder) Cancel() error {
+	if r.cancelErr != nil {
+		return r.cancelErr
+	}
+	r.canceled++
+	r.recording = false
+	return nil
+}
+
+func (r *fakeVoiceRecorder) Close() error {
+	r.closed = true
+	r.recording = false
+	if r.closeErr != nil {
+		return r.closeErr
+	}
+	return nil
+}
+
+func (r *fakeVoiceRecorder) IsRecording() bool { return r.recording }
+
 func newSwitchClient(name string) *switchClient {
 	return &switchClient{name: name, events: make(chan transport.Event)}
 }
@@ -2102,7 +2153,7 @@ func TestCommandPalettePlaysRecentVoiceNote(t *testing.T) {
 	model.peer.label = "bob"
 	model.loadHistory()
 
-	openPaletteCommand(t, model, "voice")
+	openPaletteCommand(t, model, "voice notes")
 	if !palettePathEquals(model.commandPalette.path, paletteNodeIDVoiceNotes) {
 		t.Fatalf("expected voice notes submenu to open, got path=%v", model.commandPalette.path)
 	}
@@ -2148,6 +2199,161 @@ func TestCommandPaletteStopsVoicePlayback(t *testing.T) {
 	toast, _ := model.Toast()
 	if toast != "voice note playback stopped" {
 		t.Fatalf("unexpected toast: %q", toast)
+	}
+}
+
+func TestCommandPaletteStartsVoiceRecording(t *testing.T) {
+	recorder := &fakeVoiceRecorder{}
+	model := newDirectChatTestModel(t, stubClient{})
+	model.voiceRecorder = recorder
+
+	_, cmd := openPaletteCommand(t, model, "record voice")
+	if cmd == nil {
+		t.Fatal("expected record command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected recording result message")
+	}
+	_, _ = model.Update(msg)
+	if recorder.started != 1 {
+		t.Fatalf("expected one start call, got %d", recorder.started)
+	}
+	if !model.RecordingActive() {
+		t.Fatal("expected recording state to be active")
+	}
+	to, _ := model.Toast()
+	if to != "recording voice note" {
+		t.Fatalf("unexpected toast: %q", to)
+	}
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after starting recording")
+	}
+}
+
+func TestEnterStopsVoiceRecordingAndQueuesPendingAttachment(t *testing.T) {
+	voicePath := filepath.Join(t.TempDir(), "recorded.wav")
+	if err := os.WriteFile(voicePath, mustVoiceBytes(), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+	recorder := &fakeVoiceRecorder{recording: true, stopPath: voicePath}
+	model := newDirectChatTestModel(t, stubClient{})
+	model.voiceRecorder = recorder
+	model.recording.active = true
+	model.recording.startedAt = time.Now().Add(-3 * time.Second)
+
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("expected stop recording command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected stop recording result message")
+	}
+	_, _ = model.Update(msg)
+	if recorder.stopped != 1 {
+		t.Fatalf("expected one stop call, got %d", recorder.stopped)
+	}
+	if model.RecordingActive() {
+		t.Fatal("expected recording state to be cleared")
+	}
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected stopped recording to queue a pending voice note")
+	}
+	if !strings.Contains(model.PendingAttachmentLabel(), "recorded.wav") {
+		t.Fatalf("unexpected pending attachment label: %q", model.PendingAttachmentLabel())
+	}
+	if _, err := os.Stat(voicePath); err != nil {
+		t.Fatalf("expected recorded file to remain available while queued: %v", err)
+	}
+	model.clearPendingAttachment()
+	if _, err := os.Stat(voicePath); !os.IsNotExist(err) {
+		t.Fatalf("expected queued recording cleanup after clear, err=%v", err)
+	}
+}
+
+func TestEscCancelsVoiceRecording(t *testing.T) {
+	recorder := &fakeVoiceRecorder{recording: true}
+	model := newDirectChatTestModel(t, stubClient{})
+	model.voiceRecorder = recorder
+	model.recording.active = true
+	model.recording.startedAt = time.Now().Add(-2 * time.Second)
+
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if cmd == nil {
+		t.Fatal("expected cancel recording command")
+	}
+	msg := cmd()
+	if msg == nil {
+		t.Fatal("expected cancel recording result message")
+	}
+	_, _ = model.Update(msg)
+	if recorder.canceled != 1 {
+		t.Fatalf("expected one cancel call, got %d", recorder.canceled)
+	}
+	if model.RecordingActive() {
+		t.Fatal("expected recording state to be cleared")
+	}
+	if model.HasPendingAttachment() {
+		t.Fatal("expected cancel to avoid queuing attachment")
+	}
+	to, _ := model.Toast()
+	if to != "voice recording canceled" {
+		t.Fatalf("unexpected toast: %q", to)
+	}
+}
+
+func TestRecordedVoiceNoteCanBeSentAfterStopping(t *testing.T) {
+	voicePath := filepath.Join(t.TempDir(), "recorded.wav")
+	if err := os.WriteFile(voicePath, mustVoiceBytes(), 0o600); err != nil {
+		t.Fatalf("write voice note: %v", err)
+	}
+	recorder := &fakeVoiceRecorder{recording: true, stopPath: voicePath}
+	client := &recordingClient{}
+	model := newDirectChatTestModel(t, client)
+	model.voiceRecorder = recorder
+	model.recording.active = true
+	model.recording.startedAt = time.Now().Add(-2 * time.Second)
+
+	_, stopCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if stopCmd == nil {
+		t.Fatal("expected stop recording command")
+	}
+	_, _ = model.Update(stopCmd())
+	if !model.HasPendingAttachment() {
+		t.Fatal("expected pending voice note after stop")
+	}
+	_, sendCmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if sendCmd == nil {
+		t.Fatal("expected send command for queued recording")
+	}
+	msg := sendCmd()
+	if msg == nil {
+		t.Fatal("expected send result message")
+	}
+	_, _ = model.Update(msg)
+	if len(client.sent) == 0 {
+		t.Fatal("expected recorded voice send to produce envelopes")
+	}
+	if stringsContainsAny(model.msgs.rendered, "voice note sent: recorded.wav") == false {
+		t.Fatalf("expected sent voice message in history: %+v", model.msgs.rendered)
+	}
+	if _, err := os.Stat(voicePath); err != nil {
+		t.Fatalf("expected sent recorded file to remain available for playback: %v", err)
+	}
+}
+
+func TestCloseStopsVoiceRecorder(t *testing.T) {
+	recorder := &fakeVoiceRecorder{recording: true}
+	model := newDirectChatTestModel(t, stubClient{})
+	model.voiceRecorder = recorder
+	model.recording.active = true
+
+	if err := model.Close(); err != nil {
+		t.Fatalf("close model: %v", err)
+	}
+	if !recorder.closed {
+		t.Fatal("expected model close to close voice recorder")
 	}
 }
 
@@ -2379,6 +2585,38 @@ func newHelpTestModel(t *testing.T) *Model {
 		Mailbox:   "alice",
 		RelayURL:  "ws://localhost:8080/ws",
 	})
+	model.SetSize(120, 20)
+	return model
+}
+
+func newDirectChatTestModel(t *testing.T, client transport.Client) *Model {
+	t.Helper()
+	aliceStore := store.NewClientStore(t.TempDir())
+	aliceService, _, err := messaging.New(aliceStore, "alice")
+	if err != nil {
+		t.Fatalf("new alice service: %v", err)
+	}
+	bobStore := store.NewClientStore(t.TempDir())
+	bobService, _, err := messaging.New(bobStore, "bob")
+	if err != nil {
+		t.Fatalf("new bob service: %v", err)
+	}
+	bobContact, err := identity.ContactFromInvite(bobService.Identity().InviteBundle())
+	if err != nil {
+		t.Fatalf("bob invite to contact: %v", err)
+	}
+	if err := aliceStore.SaveContact(bobContact); err != nil {
+		t.Fatalf("save bob contact: %v", err)
+	}
+	model := New(Deps{
+		Client:           client,
+		Messaging:        aliceService,
+		Mailbox:          "alice",
+		RecipientMailbox: "bob",
+		RelayURL:         "ws://localhost:8080/ws",
+	})
+	model.conn.connected = true
+	model.conn.connecting = false
 	model.SetSize(120, 20)
 	return model
 }

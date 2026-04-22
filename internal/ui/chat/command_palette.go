@@ -24,6 +24,9 @@ const (
 	commandPaletteCommandEditRelay          commandPaletteCommand = "edit-relay"
 	commandPaletteCommandThemes             commandPaletteCommand = "themes"
 	commandPaletteCommandMessageTTL         commandPaletteCommand = "message-ttl"
+	commandPaletteCommandRecordVoiceNote    commandPaletteCommand = "record-voice-note"
+	commandPaletteCommandStopRecording      commandPaletteCommand = "stop-recording"
+	commandPaletteCommandCancelRecording    commandPaletteCommand = "cancel-recording"
 	commandPaletteCommandVoiceNotes         commandPaletteCommand = "voice-notes"
 	commandPaletteCommandPlayVoiceNote      commandPaletteCommand = "play-voice-note"
 	commandPaletteCommandStopVoiceNote      commandPaletteCommand = "stop-voice-note"
@@ -75,6 +78,7 @@ type paletteCtx struct {
 	hasPeer              bool
 	pendingRequestsCount int
 	voiceNotes           []voiceNoteOption
+	voiceRecordingActive bool
 	voicePlaybackActive  bool
 	deps                 commandPaletteDeps
 }
@@ -132,6 +136,7 @@ type commandPaletteModel struct {
 	hasPeer              bool
 	pendingRequestsCount int
 	voiceNotes           []voiceNoteOption
+	voiceRecordingActive bool
 	voicePlaybackActive  bool
 	open                 bool
 	path                 []string
@@ -180,10 +185,11 @@ func (m *commandPaletteModel) OpenAtPath(path []string) tea.Cmd {
 	return focusCmd
 }
 
-func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int, voiceNotes []voiceNoteOption, voicePlaybackActive bool) {
+func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int, voiceNotes []voiceNoteOption, voiceRecordingActive bool, voicePlaybackActive bool) {
 	m.hasPeer = hasPeer
 	m.pendingRequestsCount = pendingRequestsCount
 	m.voiceNotes = append(m.voiceNotes[:0], voiceNotes...)
+	m.voiceRecordingActive = voiceRecordingActive
 	m.voicePlaybackActive = voicePlaybackActive
 }
 
@@ -238,6 +244,7 @@ func (m *commandPaletteModel) ctx() paletteCtx {
 		hasPeer:              m.hasPeer,
 		pendingRequestsCount: m.pendingRequestsCount,
 		voiceNotes:           append([]voiceNoteOption(nil), m.voiceNotes...),
+		voiceRecordingActive: m.voiceRecordingActive,
 		voicePlaybackActive:  m.voicePlaybackActive,
 		deps:                 m.deps,
 	}

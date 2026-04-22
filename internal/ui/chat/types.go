@@ -14,6 +14,7 @@ type Deps struct {
 	Client                transport.Client
 	Messaging             *messaging.Service
 	VoicePlayer           VoicePlayer
+	VoiceRecorder         VoiceRecorder
 	Mailbox               string
 	RecipientMailbox      string
 	RelayURL              string
@@ -32,6 +33,14 @@ type VoicePlayer interface {
 	Stop() error
 	Close() error
 	IsPlaying() bool
+}
+
+type VoiceRecorder interface {
+	Start() error
+	Stop() (string, error)
+	Cancel() error
+	Close() error
+	IsRecording() bool
 }
 
 // Dependencies.
@@ -187,6 +196,15 @@ type voicePlaybackResultMsg struct {
 	err      error
 }
 
+type voiceRecordingStartedMsg struct{ err error }
+
+type voiceRecordingStoppedMsg struct {
+	path string
+	err  error
+}
+
+type voiceRecordingCanceledMsg struct{ err error }
+
 const (
 	typingAnimationInterval = 350 * time.Millisecond
 	typingIdleTimeout       = 2 * time.Second
@@ -200,8 +218,14 @@ type draftState struct {
 }
 
 type pendingAttachment struct {
-	path string
-	kind string
-	name string
-	size int64
+	path    string
+	kind    string
+	name    string
+	size    int64
+	cleanup func()
+}
+
+type recordingState struct {
+	active    bool
+	startedAt time.Time
 }
