@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 )
 
 type Recorder struct {
@@ -21,10 +22,11 @@ type Recorder struct {
 }
 
 type recordingProcess struct {
-	cmd *exec.Cmd
-	mu  sync.Mutex
-	wg  sync.WaitGroup
-	err error
+	cmd  *exec.Cmd
+	path string
+	mu   sync.Mutex
+	wg   sync.WaitGroup
+	err  error
 }
 
 type recordingCandidate struct {
@@ -62,7 +64,7 @@ func (r *Recorder) Start() error {
 		return fmt.Errorf("start voice recording: %w", err)
 	}
 
-	proc := &recordingProcess{cmd: cmd}
+	proc := &recordingProcess{cmd: cmd, path: path}
 	proc.wg.Add(1)
 	go func() {
 		defer proc.wg.Done()
@@ -173,30 +175,41 @@ func createRecordingFile() (string, func(), error) {
 }
 
 func recordCommandFor(path string) (*exec.Cmd, error) {
-	tried := make([]string, 0, 4)
-	for _, candidate := range recordingCandidates(runtime.GOOS) {
+	candidates := recordingCandidates(runtime.GOOS)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("voice recording is not supported on %s", runtime.GOOS)
+	}
+	tried := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
 		if _, err := exec.LookPath(candidate.name); err != nil {
 			tried = append(tried, candidate.name)
 			continue
 		}
 		return exec.Command(candidate.name, candidate.args(path)...), nil
 	}
-	if len(tried) == 0 {
-		return nil, fmt.Errorf("voice recording is not supported on %s", runtime.GOOS)
-	}
 	return nil, fmt.Errorf("no supported voice recorder found; install one of: %s", strings.Join(uniqueStrings(tried), ", "))
 }
 
 func recordingCandidates(goos string) []recordingCandidate {
-	if goos != "linux" {
+	switch goos {
+	case "linux":
+		return []recordingCandidate{
+			{name: "pw-record", args: func(path string) []string { return []string{"--rate", "16000", "--channels", "1", path} }},
+			{name: "ffmpeg", args: func(path string) []string {
+				return []string{"-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", "-y", path}
+			}},
+			{name: "arecord", args: func(path string) []string { return []string{"-q", "-f", "S16_LE", "-c", "1", "-r", "16000", path} }},
+		}
+	case "darwin":
+		return []recordingCandidate{
+			{name: "ffmpeg", args: func(path string) []string {
+				return []string{"-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", ":default", "-ac", "1", "-ar", "16000", "-y", path}
+			}},
+			{name: "rec", args: func(path string) []string { return []string{"-q", "-c", "1", "-r", "16000", path} }},
+			{name: "sox", args: func(path string) []string { return []string{"-q", "-d", "-c", "1", "-r", "16000", path} }},
+		}
+	default:
 		return nil
-	}
-	return []recordingCandidate{
-		{name: "pw-record", args: func(path string) []string { return []string{"--rate", "16000", "--channels", "1", path} }},
-		{name: "ffmpeg", args: func(path string) []string {
-			return []string{"-hide_banner", "-loglevel", "error", "-f", "pulse", "-i", "default", "-ac", "1", "-ar", "16000", "-y", path}
-		}},
-		{name: "arecord", args: func(path string) []string { return []string{"-q", "-f", "S16_LE", "-c", "1", "-r", "16000", path} }},
 	}
 }
 
@@ -207,11 +220,11 @@ func (p *recordingProcess) stop() error {
 	if p.cmd == nil || p.cmd.Process == nil {
 		return fmt.Errorf("voice recorder process not available")
 	}
-	if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
+	if err := signalProcess(p.cmd.Process, os.Interrupt, syscall.SIGTERM); err != nil {
 		return fmt.Errorf("stop voice recording: %w", err)
 	}
 	p.wg.Wait()
-	if err := p.waitErr(); err != nil && !isAcceptableStopError(err) {
+	if err := p.waitErr(); err != nil && !isAcceptableStopError(err) && !hasRecordedAudio(p.path) {
 		return fmt.Errorf("stop voice recording: %w", err)
 	}
 	return nil
@@ -239,12 +252,44 @@ func isAcceptableStopError(err error) bool {
 		return true
 	}
 	text := err.Error()
-	for _, needle := range []string{"signal: interrupt", "terminated by signal", "received signal"} {
+	for _, needle := range []string{"signal: interrupt", "signal: terminated", "terminated by signal", "received signal", "exit status 255"} {
 		if strings.Contains(text, needle) {
 			return true
 		}
 	}
 	return false
+}
+
+func signalProcess(proc *os.Process, signals ...os.Signal) error {
+	if proc == nil {
+		return fmt.Errorf("voice recorder process not available")
+	}
+	var lastErr error
+	for _, signal := range signals {
+		if signal == nil {
+			continue
+		}
+		if err := proc.Signal(signal); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no stop signal available")
+	}
+	return lastErr
+}
+
+func hasRecordedAudio(path string) bool {
+	if strings.TrimSpace(path) == "" {
+		return false
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		return false
+	}
+	return info.Size() > 0
 }
 
 func RecordedFilename(path string) string {
