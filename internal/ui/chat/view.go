@@ -30,6 +30,9 @@ func (m *Model) View() string {
 	if m.commandPalette.open {
 		return m.clearInlineMedia(m.commandPalette.View(view, m.ui.width, m.ui.height, m.PeerLabel()))
 	}
+	if m.filePicker.open {
+		return m.clearInlineMedia(m.filePicker.View(view))
+	}
 	return view
 }
 
@@ -103,9 +106,6 @@ func (m *Model) renderSidebar() string {
 
 func (m *Model) renderConversation() string {
 	width := m.conversationWidth()
-	if m.filePicker.open {
-		return m.clearInlineMedia(m.filePicker.View())
-	}
 	if m.peer.mailbox == "" {
 		hasDirectContacts := false
 		for _, contact := range m.contacts {

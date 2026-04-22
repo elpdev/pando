@@ -169,7 +169,7 @@ func New(deps Deps) *Model {
 	if m.peer.mailbox == "" {
 		m.ui.focus = focusSidebar
 	}
-	m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
+	m.filePicker.SetSize(m.ui.width, m.ui.height)
 	return m
 }
 
