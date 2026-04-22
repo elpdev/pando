@@ -4,70 +4,80 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/messaging"
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
-func (m *Model) renderPeerDetailModal(base string) string {
-	if m.ui.width <= 0 || m.ui.height <= 0 {
-		return base
-	}
+// peerDetailView renders read-only info about the active peer (or room).
+// It's a thin adapter over Model so it can inspect live peer and relay state
+// at render time; the pointer is captured on Open.
+type peerDetailView struct {
+	m *Model
+}
 
-	title := "Peer detail"
-	if m.peer.isRoom {
-		title = "Room detail"
-	}
+func (v *peerDetailView) Open(viewOpenCtx) tea.Cmd { return nil }
 
-	var subtitle string
-	if m.peer.isRoom {
-		subtitle = style.StatusInfo.Bold(true).Render(m.peer.label)
-	} else {
-		verifyLabel := identity.TrustLabel(m.peer.trustSource, m.peer.verified)
-		verifyLine := style.UnverifiedWarn.Render(verifyLabel)
-		if m.peer.verified {
-			verifyLine = style.VerifiedOk.Render(verifyLabel)
-		}
-		mailboxLine := style.PeerAccentStyle(m.peer.fingerprint).Bold(true).Render(m.peer.mailbox)
-		subtitle = mailboxLine + "  " + verifyLine
-	}
+func (v *peerDetailView) Close() {}
 
+func (v *peerDetailView) Update(msg tea.Msg) (bool, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
+	}
+	if v.m.canVerifyActiveContact() && (key.String() == "v" || key.String() == "y") {
+		return true, paletteNavigateCmd(paletteNodeIDContacts, string(commandPaletteCommandVerifyContact))
+	}
+	return false, nil
+}
+
+func (v *peerDetailView) Body(int, int) string {
 	row := func(label, value string) string {
 		return style.Muted.Render(label) + "  " + value
 	}
+	peer := v.m.peer
 	var rows []string
-	if m.peer.isRoom {
+	if peer.isRoom {
 		rows = append(rows,
-			row("members", style.Bright.Render(fmt.Sprintf("%d/%d", m.peer.memberCount, messaging.DefaultRoomCap))),
-			row("status ", style.Muted.Render(map[bool]string{true: "joined", false: "not joined"}[m.peer.joined])),
-			row("relay  ", style.Muted.Render(m.relay.url)),
+			row("members", style.Bright.Render(fmt.Sprintf("%d/%d", peer.memberCount, messaging.DefaultRoomCap))),
+			row("status ", style.Muted.Render(map[bool]string{true: "joined", false: "not joined"}[peer.joined])),
+			row("relay  ", style.Muted.Render(v.m.relay.url)),
 		)
 	} else {
-		fullFp := m.peer.fingerprint
+		fullFp := peer.fingerprint
 		shortFp := style.FormatFingerprintShort(fullFp)
 		fpLong := style.FormatFingerprint(fullFp)
 		deviceCount := 0
-		if contact, err := m.messaging.Contact(m.peer.mailbox); err == nil {
+		if contact, err := v.m.messaging.Contact(peer.mailbox); err == nil {
 			deviceCount = len(contact.ActiveDevices())
 		}
 		rows = append(rows,
 			row("fingerprint", style.Bright.Render(fpLong)),
 			row("short     ", style.Muted.Render(shortFp)),
 			row("devices   ", style.Bright.Render(fmt.Sprintf("%d active", deviceCount))),
-			row("relay     ", style.Muted.Render(m.relay.url)),
+			row("relay     ", style.Muted.Render(v.m.relay.url)),
 		)
 	}
-
-	return renderPaletteOverlay(
-		m.ui.width, m.ui.height,
-		title, subtitle,
-		[]string{strings.Join(rows, "\n")},
-		m.peerDetailFooter(),
-	)
+	return strings.Join(rows, "\n")
 }
 
-func (m *Model) peerDetailFooter() string {
-	if m.canVerifyActiveContact() {
+func (v *peerDetailView) Subtitle() string {
+	peer := v.m.peer
+	if peer.isRoom {
+		return style.StatusInfo.Bold(true).Render(peer.label)
+	}
+	verifyLabel := identity.TrustLabel(peer.trustSource, peer.verified)
+	verifyLine := style.UnverifiedWarn.Render(verifyLabel)
+	if peer.verified {
+		verifyLine = style.VerifiedOk.Render(verifyLabel)
+	}
+	mailboxLine := style.PeerAccentStyle(peer.fingerprint).Bold(true).Render(peer.mailbox)
+	return mailboxLine + "  " + verifyLine
+}
+
+func (v *peerDetailView) Footer() string {
+	if v.m.canVerifyActiveContact() {
 		return "v verify · esc close"
 	}
 	return "esc to close"

@@ -9,8 +9,6 @@ import (
 
 func (m *addContactModal) updateChooserKey(msg tea.KeyMsg) tea.Cmd {
 	switch msg.Type {
-	case tea.KeyEsc:
-		return closeAddContactCmd(false)
 	case tea.KeyUp, tea.KeyCtrlP:
 		m.moveSelection(-1, len(m.chooserItems()))
 		return nil

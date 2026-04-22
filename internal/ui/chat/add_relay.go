@@ -10,8 +10,13 @@ import (
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
+// addRelayModal renders both the Add relay and Edit relay flows inside the
+// command palette. Which flow is active is derived from the palette path at
+// Open time: a path ending in "edit-relay/<name>" triggers edit mode for that
+// saved relay profile; otherwise the view shows empty inputs for adding a
+// new profile.
 type addRelayModal struct {
-	open      bool
+	m         *Model
 	editing   bool
 	original  string
 	inputs    []textinput.Model
@@ -20,7 +25,7 @@ type addRelayModal struct {
 	maskToken bool
 }
 
-func newAddRelayModal() addRelayModal {
+func newAddRelayModal(m *Model) addRelayModal {
 	name := textinput.New()
 	name.Placeholder = "name"
 	url := textinput.New()
@@ -29,41 +34,40 @@ func newAddRelayModal() addRelayModal {
 	token.Placeholder = "optional token"
 	token.EchoMode = textinput.EchoPassword
 	token.EchoCharacter = '*'
-	return addRelayModal{inputs: []textinput.Model{name, url, token}, maskToken: true}
+	return addRelayModal{m: m, inputs: []textinput.Model{name, url, token}, maskToken: true}
 }
 
-func (m *addRelayModal) Open() tea.Cmd {
-	*m = newAddRelayModal()
-	m.open = true
-	return m.inputs[0].Focus()
-}
-
-func (m *addRelayModal) OpenEdit(relay config.RelayProfile) tea.Cmd {
-	*m = newAddRelayModal()
-	m.open = true
-	m.editing = true
-	m.original = relay.Name
-	m.inputs[0].SetValue(relay.Name)
-	m.inputs[1].SetValue(relay.URL)
-	m.inputs[2].SetValue(relay.Token)
+func (m *addRelayModal) Open(ctx viewOpenCtx) tea.Cmd {
+	model := m.m
+	*m = newAddRelayModal(model)
+	// If the path routed us through "edit-relay/<name>", prefill the inputs.
+	if len(ctx.path) >= 3 && ctx.path[len(ctx.path)-2] == paletteNodeIDEditRelay {
+		relay, ok := model.lookupRelayProfile(ctx.path[len(ctx.path)-1])
+		if !ok {
+			return completePaletteCmd(fmt.Sprintf("relay %s not found", ctx.path[len(ctx.path)-1]), ToastBad)
+		}
+		m.editing = true
+		m.original = relay.Name
+		m.inputs[0].SetValue(relay.Name)
+		m.inputs[1].SetValue(relay.URL)
+		m.inputs[2].SetValue(relay.Token)
+	}
 	return m.inputs[0].Focus()
 }
 
 func (m *addRelayModal) Close() {
-	*m = newAddRelayModal()
+	*m = newAddRelayModal(m.m)
 }
 
 func (m *addRelayModal) Update(msg tea.Msg) (bool, tea.Cmd) {
-	if !m.open {
+	keyMsg, ok := msg.(tea.KeyMsg)
+	if !ok {
 		return false, nil
 	}
-	if _, ok := msg.(tea.KeyMsg); !ok {
+	if keyMsg.Type == tea.KeyEsc {
 		return false, nil
 	}
-	keyMsg := msg.(tea.KeyMsg)
 	switch keyMsg.Type {
-	case tea.KeyEsc:
-		return true, func() tea.Msg { return addRelayClosedMsg{} }
 	case tea.KeyTab, tea.KeyShiftTab, tea.KeyUp, tea.KeyDown:
 		return true, m.moveFocus(keyMsg)
 	case tea.KeyEnter:
@@ -91,6 +95,34 @@ func (m *addRelayModal) Update(msg tea.Msg) (bool, tea.Cmd) {
 	return true, cmd
 }
 
+func (m *addRelayModal) Body(width, _ int) string {
+	bodyWidth := max(1, width)
+	lines := []string{
+		style.PaletteMeta.Width(bodyWidth).Render("Save a named relay profile and switch to it immediately."),
+		renderRelayInput(bodyWidth, "Name", m.inputs[0], m.focused == 0),
+		renderRelayInput(bodyWidth, "URL", m.inputs[1], m.focused == 1),
+		renderRelayInput(bodyWidth, "Token", m.inputs[2], m.focused == 2),
+	}
+	if m.error != "" {
+		lines = append(lines, style.StatusBad.Width(bodyWidth).Render(m.error))
+	}
+	return strings.Join(lines, "\n\n")
+}
+
+func (m *addRelayModal) Subtitle() string {
+	if m.editing {
+		return "Update a saved relay profile and keep the active relay in sync."
+	}
+	return "Relay profiles persist to device config."
+}
+
+func (m *addRelayModal) Footer() string {
+	if m.editing {
+		return "tab move · enter save changes · ctrl+t show/hide token · esc cancel"
+	}
+	return "tab move · enter save · ctrl+t show/hide token · esc cancel"
+}
+
 func (m *addRelayModal) moveFocus(msg tea.KeyMsg) tea.Cmd {
 	m.inputs[m.focused].Blur()
 	if msg.Type == tea.KeyShiftTab || msg.Type == tea.KeyUp {
@@ -114,31 +146,6 @@ func (m addRelayModal) profile() (config.RelayProfile, error) {
 	return config.RelayProfile{Name: name, URL: url, Token: token}, nil
 }
 
-func (m addRelayModal) Overlay(width, height int) string {
-	if !m.open {
-		return ""
-	}
-	bodyWidth := max(1, paletteWidth(width)-6)
-	lines := []string{
-		style.PaletteMeta.Width(bodyWidth).Render("Save a named relay profile and switch to it immediately."),
-		renderRelayInput(bodyWidth, "Name", m.inputs[0], m.focused == 0),
-		renderRelayInput(bodyWidth, "URL", m.inputs[1], m.focused == 1),
-		renderRelayInput(bodyWidth, "Token", m.inputs[2], m.focused == 2),
-	}
-	if m.error != "" {
-		lines = append(lines, style.StatusBad.Width(bodyWidth).Render(m.error))
-	}
-	title := "Add Relay"
-	subtitle := "Relay profiles persist to device config."
-	footer := "tab move · enter save · ctrl+t show/hide token · esc cancel"
-	if m.editing {
-		title = "Edit Relay"
-		subtitle = "Update a saved relay profile and keep the active relay in sync."
-		footer = "tab move · enter save changes · ctrl+t show/hide token · esc cancel"
-	}
-	return renderPaletteOverlay(width, height, title, subtitle, []string{strings.Join(lines, "\n\n")}, footer)
-}
-
 func renderRelayInput(width int, label string, input textinput.Model, focused bool) string {
 	input.Width = max(1, width-2)
 	heading := style.Muted.Render(label)
@@ -148,37 +155,15 @@ func renderRelayInput(width int, label string, input textinput.Model, focused bo
 	return heading + "\n" + style.PaletteInput.Width(width).Padding(0, 1).Render(input.View())
 }
 
-func (m *Model) openAddRelayModal() tea.Cmd {
-	m.input.Blur()
-	return m.addRelay.Open()
-}
-
-func (m *Model) openEditRelayModal(name string) tea.Cmd {
-	relay, ok := m.lookupRelayProfile(name)
-	if !ok {
-		m.pushToast(fmt.Sprintf("relay %s not found", name), ToastBad)
-		return nil
-	}
-	m.input.Blur()
-	return m.addRelay.OpenEdit(relay)
-}
-
-func (m *Model) closeAddRelayModal(keepStatus bool) {
-	m.addRelay.Close()
-	if !keepStatus {
-		m.pushToast("add relay cancelled", ToastInfo)
-	}
-	if m.ui.focus == focusChat {
-		m.input.Focus()
-	}
-}
-
 func (m *Model) handleAddRelaySavedMsg(msg addRelaySavedMsg) (*Model, tea.Cmd) {
 	if err := m.addRelayProfile(msg.relay); err != nil {
 		m.addRelay.error = err.Error()
 		return m, nil
 	}
-	m.closeAddRelayModal(true)
+	m.commandPalette.Close()
+	if m.ui.focus == focusChat {
+		m.input.Focus()
+	}
 	m.pushToast(fmt.Sprintf("saved relay %s", msg.relay.Name), ToastInfo)
 	return m, m.switchRelay(msg.relay.Name)
 }
@@ -188,15 +173,13 @@ func (m *Model) handleEditRelaySavedMsg(msg editRelaySavedMsg) (*Model, tea.Cmd)
 		m.addRelay.error = err.Error()
 		return m, nil
 	}
-	m.closeAddRelayModal(true)
+	m.commandPalette.Close()
+	if m.ui.focus == focusChat {
+		m.input.Focus()
+	}
 	m.pushToast(fmt.Sprintf("updated relay %s", msg.relay.Name), ToastInfo)
 	if m.relay.active == msg.original || m.relay.active == msg.relay.Name {
 		return m, m.switchRelay(msg.relay.Name)
 	}
-	return m, nil
-}
-
-func (m *Model) handleAddRelayClosedMsg(msg addRelayClosedMsg) (*Model, tea.Cmd) {
-	m.closeAddRelayModal(msg.keepStatus)
 	return m, nil
 }

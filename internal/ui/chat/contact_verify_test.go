@@ -32,11 +32,11 @@ func TestVerifyContactOpensFromPaletteAndMarksVerified(t *testing.T) {
 	model.SetSize(120, 24)
 
 	openPaletteCommand(t, model, "verify contact")
-	if !model.contactVerify.open {
-		t.Fatal("expected verify contact modal to open")
+	if model.commandPalette.activeViewID() != paletteViewContactVerify {
+		t.Fatalf("expected palette at verify view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
-	if !strings.Contains(model.View(), "Verify Contact") {
-		t.Fatalf("expected verify contact modal in view: %q", model.View())
+	if !strings.Contains(model.View(), "Verify") {
+		t.Fatalf("expected verify title in view: %q", model.View())
 	}
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
@@ -48,8 +48,8 @@ func TestVerifyContactOpensFromPaletteAndMarksVerified(t *testing.T) {
 		t.Fatalf("expected contactVerifyConfirmedMsg, got %T", msg)
 	}
 	_, _ = model.Update(result)
-	if model.contactVerify.open {
-		t.Fatal("expected verify modal to close")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after successful verify")
 	}
 	stored, err := clientStore.LoadContact("bob")
 	if err != nil {
@@ -87,16 +87,20 @@ func TestPeerDetailVerifyShortcutOpensModal(t *testing.T) {
 	}
 	model := New(Deps{Client: stubClient{}, Messaging: aliceService, Mailbox: "alice", RecipientMailbox: "bob", RelayURL: "ws://localhost:8080/ws"})
 	model.SetSize(120, 24)
-	model.peerDetailOpen = true
+	openPaletteCommand(t, model, "peer detail")
+	if model.commandPalette.activeViewID() != paletteViewPeerDetail {
+		t.Fatalf("expected palette at peer-detail view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
+	}
+	peerDetail := &peerDetailView{m: model}
+	if peerDetail.Footer() != "v verify · esc close" {
+		t.Fatalf("unexpected peer detail footer: %q", peerDetail.Footer())
+	}
 
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("v")})
 	if cmd != nil {
 		drainMsg(t, model, cmd)
 	}
-	if !model.contactVerify.open {
-		t.Fatal("expected verify modal from peer detail shortcut")
-	}
-	if model.peerDetailFooter() != "v verify · esc close" {
-		t.Fatalf("unexpected peer detail footer: %q", model.peerDetailFooter())
+	if model.commandPalette.activeViewID() != paletteViewContactVerify {
+		t.Fatalf("expected v shortcut to navigate to verify, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 }

@@ -167,7 +167,6 @@ type filePickerClosedMsg struct{}
 type filePickerErrorMsg struct{ err error }
 type filePickerSelectedMsg struct{ path string }
 type addRelaySavedMsg struct{ relay config.RelayProfile }
-type addRelayClosedMsg struct{ keepStatus bool }
 type editRelaySavedMsg struct {
 	original string
 	relay    config.RelayProfile

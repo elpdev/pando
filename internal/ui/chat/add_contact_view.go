@@ -15,20 +15,6 @@ type addContactMenuItem struct {
 	disabled bool
 }
 
-func (m addContactModal) Overlay(_ string, width, height int) string {
-	modalWidth := paletteWidth(width)
-	modalHeight := paletteHeight(height)
-	if modalWidth <= 0 || modalHeight <= 0 {
-		return ""
-	}
-
-	bodyParts := []string{m.View(modalWidth-6, modalHeight)}
-	if m.error != "" {
-		bodyParts = append(bodyParts, style.StatusBad.Width(modalWidth-6).Render(m.error))
-	}
-	return renderPaletteOverlay(width, height, "Add Contact", "Secure onboarding for a new peer.", bodyParts, m.footer())
-}
-
 func (m addContactModal) View(width, modalHeight int) string {
 	switch m.mode {
 	case addContactModeChooser:

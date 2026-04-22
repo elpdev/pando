@@ -17,11 +17,11 @@ import (
 func TestSendContactRequestModalOpensFromPalette(t *testing.T) {
 	model := newHelpTestModel(t)
 	openPaletteCommand(t, model, "send contact request")
-	if !model.contactRequestSend.open {
-		t.Fatal("expected send contact request modal to open")
+	if model.commandPalette.activeViewID() != paletteViewContactRequestSend {
+		t.Fatalf("expected palette at send-contact-request view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
-	if !strings.Contains(model.View(), "Send Contact Request") {
-		t.Fatalf("expected send contact request modal in view: %q", model.View())
+	if !strings.Contains(model.View(), "Send contact request") {
+		t.Fatalf("expected send contact request breadcrumb in view: %q", model.View())
 	}
 }
 
@@ -41,8 +41,8 @@ func TestSendContactRequestPersistsOutgoingRequest(t *testing.T) {
 	}
 
 	openPaletteCommand(t, model, "send contact request")
-	if !model.contactRequestSend.open {
-		t.Fatal("expected send contact request modal to open")
+	if model.commandPalette.activeViewID() != paletteViewContactRequestSend {
+		t.Fatalf("expected palette at send-contact-request view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("bob")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -60,8 +60,8 @@ func TestSendContactRequestPersistsOutgoingRequest(t *testing.T) {
 		t.Fatalf("send contact request failed: %v", result.err)
 	}
 	_, _ = model.Update(result)
-	if model.contactRequestSend.open {
-		t.Fatal("expected modal to close after send")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after send")
 	}
 	req, err := model.messaging.LoadContactRequest("bob")
 	if err != nil {
@@ -120,8 +120,8 @@ func TestSendContactRequestShowsPublishError(t *testing.T) {
 	if model.contactRequestSend.error != "relay down" {
 		t.Fatalf("expected relay error to surface, got %q", model.contactRequestSend.error)
 	}
-	if !model.contactRequestSend.open {
-		t.Fatal("expected modal to remain open on error")
+	if model.commandPalette.activeViewID() != paletteViewContactRequestSend {
+		t.Fatal("expected palette to remain on send view after error")
 	}
 }
 

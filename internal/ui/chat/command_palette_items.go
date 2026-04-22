@@ -266,7 +266,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Import a peer invite, look up a mailbox, or verify with an exchange code.",
 					meta:    "ADD",
 					aliases: []string{"add", "invite", "import", "contact"},
-					action:  &commandPaletteAction{command: commandPaletteCommandAddContact},
+					view:    paletteViewAddContact,
 				},
 				{
 					id:      string(commandPaletteCommandSendContactRequest),
@@ -274,7 +274,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Ask a discoverable mailbox to connect without importing them yet.",
 					meta:    "SEND",
 					aliases: []string{"send", "request", "introduce", "invite"},
-					action:  &commandPaletteAction{command: commandPaletteCommandSendContactRequest},
+					view:    paletteViewContactRequestSend,
 				},
 				{
 					id:      string(commandPaletteCommandContactRequests),
@@ -282,7 +282,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Review pending requests to connect, then accept or reject them.",
 					meta:    contactRequestsPaletteMeta(c.pendingRequestsCount),
 					aliases: []string{"requests", "inbox", "pending", "accept", "reject"},
-					action:  &commandPaletteAction{command: commandPaletteCommandContactRequests},
+					view:    paletteViewContactRequests,
 				},
 			}
 			if c.hasPeer {
@@ -292,7 +292,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Confirm the active contact's fingerprint and mark them as manually verified.",
 					meta:    "VERIFY",
 					aliases: []string{"verify", "trust", "fingerprint"},
-					action:  &commandPaletteAction{command: commandPaletteCommandVerifyContact},
+					view:    paletteViewContactVerify,
 				})
 				kids = append(kids, paletteNode{
 					id:      string(commandPaletteCommandPeerDetail),
@@ -300,7 +300,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Inspect the current peer fingerprint, trust state, devices, and relay.",
 					meta:    "DETAIL",
 					aliases: []string{"detail", "peer", "info"},
-					action:  &commandPaletteAction{command: commandPaletteCommandPeerDetail},
+					view:    paletteViewPeerDetail,
 				})
 			}
 			return kids
@@ -332,7 +332,7 @@ func relaysNode() paletteNode {
 					detail:  "Save a new relay profile with name, URL, and optional token.",
 					meta:    "ADD",
 					aliases: []string{"add", "new", "create"},
-					action:  &commandPaletteAction{command: commandPaletteCommandAddRelay},
+					view:    paletteViewAddRelay,
 				},
 				{
 					id:       paletteNodeIDEditRelay,
@@ -341,7 +341,7 @@ func relaysNode() paletteNode {
 					meta:     "EDIT",
 					aliases:  []string{"edit", "rename", "update"},
 					dynamic:  true,
-					children: relayListChildren(commandPaletteCommandEditRelay, false),
+					children: editRelayChildren,
 				},
 				{
 					id:       paletteNodeIDRemoveRelay,
@@ -384,9 +384,48 @@ func settingsNode() paletteNode {
 					dynamic:  true,
 					children: messageTTLChildren,
 				},
+				{
+					id:      paletteNodeIDHelp,
+					title:   "Help",
+					detail:  "Keyboard shortcuts for navigation and messaging.",
+					meta:    "HELP",
+					aliases: []string{"help", "shortcuts", "keys", "keyboard", "?"},
+					view:    paletteViewHelp,
+				},
 			}
 		},
 	}
+}
+
+func editRelayChildren(ctx paletteCtx) []paletteNode {
+	if ctx.deps.relayProfiles == nil {
+		return nil
+	}
+	relays := ctx.deps.relayProfiles()
+	current := ""
+	if ctx.deps.currentRelayName != nil {
+		current = ctx.deps.currentRelayName()
+	}
+	nodes := make([]paletteNode, 0, len(relays))
+	for _, relay := range relays {
+		detail := relay.URL
+		meta := ""
+		if relay.Token != "" {
+			detail += "  token configured"
+		}
+		if relay.Name == current {
+			meta = "ACTIVE"
+		}
+		nodes = append(nodes, paletteNode{
+			id:      relay.Name,
+			title:   relay.Name,
+			detail:  detail,
+			meta:    meta,
+			aliases: []string{relay.Name, relay.URL},
+			view:    paletteViewAddRelay,
+		})
+	}
+	return nodes
 }
 
 func relayListChildren(command commandPaletteCommand, markLocked bool) func(paletteCtx) []paletteNode {

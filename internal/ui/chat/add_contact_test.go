@@ -184,7 +184,7 @@ func openAddContactViaPalette(t *testing.T, model *Model) {
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("add contact")})
 	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	drainMsg(t, model, cmd)
-	if !model.addContact.open {
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
 		t.Fatal("expected add contact modal to open from command palette")
 	}
 }
@@ -211,7 +211,7 @@ func TestAddContactLookupAppliesRelayDirectoryTrust(t *testing.T) {
 	}
 	drainMsg(t, model, cmd)
 
-	if model.addContact.open {
+	if model.commandPalette.open {
 		t.Fatal("expected modal to close after successful lookup")
 	}
 	contact, err := model.messaging.Contact("carol")
@@ -274,7 +274,7 @@ func TestAddContactInviteAcceptAppliesInviteCodeTrust(t *testing.T) {
 	}
 	drainMsg(t, model, cmd)
 
-	if model.addContact.open {
+	if model.commandPalette.open {
 		t.Fatal("expected modal to close after successful invite exchange")
 	}
 	contact, err := model.messaging.Contact("dave")
@@ -414,7 +414,7 @@ func TestAddContactInviteEscCancelsPolling(t *testing.T) {
 		t.Fatalf("expected cancelled=true, got err=%v", result.err)
 	}
 	_, _ = model.Update(result)
-	if !model.addContact.open {
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
 		t.Fatal("modal should remain open after cancel")
 	}
 	if model.addContact.busy {
@@ -487,7 +487,7 @@ func TestAddContactLookupSurfacesRelayError(t *testing.T) {
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	drainMsg(t, model, cmd)
 
-	if !model.addContact.open {
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
 		t.Fatal("modal should remain open on relay error")
 	}
 	if model.addContact.error != "relay 500" {

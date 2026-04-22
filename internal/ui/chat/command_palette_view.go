@@ -15,6 +15,20 @@ func (m commandPaletteModel) View(base string, width, height int, peerLabel stri
 		return base
 	}
 	bodyWidth := max(1, paletteWidth(width)-6)
+	bodyHeight := max(1, paletteHeight(height)-6)
+	// When the path points to a view node, hand the body region over to the
+	// view's Body method and let it pick its own subtitle/footer.
+	if view := m.activeView(); view != nil {
+		subtitle := view.Subtitle()
+		if subtitle == "" {
+			subtitle = m.subtitle(peerLabel)
+		}
+		footer := view.Footer()
+		if footer == "" {
+			footer = m.footer()
+		}
+		return renderFloatingPaletteOverlay(base, width, height, m.title(), subtitle, []string{view.Body(bodyWidth, bodyHeight)}, footer)
+	}
 	m.filter.Width = max(1, bodyWidth-2)
 	filterBox := style.PaletteInput.Width(bodyWidth).Padding(0, 1).Render(m.filter.View())
 	items := m.visibleItems(m.hasPeer)

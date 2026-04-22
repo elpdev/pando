@@ -206,7 +206,7 @@ func TestContactRequestsModalAcceptPath(t *testing.T) {
 
 	request := seedPendingIncomingRequest(t, bobService, aliceService, aliceStore, "hi alice")
 	model.handleContactRequestUpdate(&request)
-	model.openContactRequestsModal()
+	openPaletteCommand(t, model, "contact requests")
 
 	updated, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	if updated != model {
@@ -282,7 +282,7 @@ func TestContactRequestsModalRejectPath(t *testing.T) {
 
 	request := seedPendingIncomingRequest(t, bobService, aliceService, aliceStore, "")
 	model.handleContactRequestUpdate(&request)
-	model.openContactRequestsModal()
+	openPaletteCommand(t, model, "contact requests")
 
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
 	if cmd == nil {
@@ -341,7 +341,7 @@ func TestContactRequestsModalHandlesSendError(t *testing.T) {
 
 	request := seedPendingIncomingRequest(t, bobService, aliceService, aliceStore, "")
 	model.handleContactRequestUpdate(&request)
-	model.openContactRequestsModal()
+	openPaletteCommand(t, model, "contact requests")
 
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("a")})
 	if cmd == nil {

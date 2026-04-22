@@ -48,8 +48,6 @@ type Model struct {
 	contactVerify        contactVerifyModal
 	contactRequests      contactRequestsModal
 	pendingRequestsCount int
-	helpOpen             bool
-	peerDetailOpen       bool
 	unread               map[string]int
 }
 
@@ -138,13 +136,16 @@ func New(deps Deps) *Model {
 		relayProfiles: func() []config.RelayProfile {
 			return append([]config.RelayProfile(nil), m.relay.profiles...)
 		},
+		resolveView: m.resolvePaletteView,
+		onEnterView: m.enterPaletteView,
+		onExitView:  m.exitPaletteView,
 	})
 	m.addContact = newAddContactModal(addContactDeps{
 		messaging:         deps.Messaging,
 		ensureRelayClient: m.ensureRelayClient,
 		relayConfigured:   m.relayConfigured,
 	})
-	m.addRelay = newAddRelayModal()
+	m.addRelay = newAddRelayModal(m)
 	m.contactRequestSend = newContactRequestSendModal(contactRequestSendDeps{
 		messaging:         deps.Messaging,
 		ensureRelayClient: m.ensureRelayClient,
@@ -227,26 +228,34 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		if next, cmd := m.handleKeyMsg(msg); next != nil {
 			return next, cmd
 		}
+	case paletteCloseMsg:
+		return m.handlePaletteCloseMsg(msg)
+	case paletteNavigateMsg:
+		return m, m.commandPalette.OpenAtPath(msg.path)
+	case paletteBackMsg:
+		m.commandPalette.back()
+		if !m.commandPalette.open && m.ui.focus == focusChat {
+			m.input.Focus()
+		}
+		return m, nil
 	case addContactCompletedMsg:
 		return m.handleAddContactCompletedMsg(msg)
-	case addContactClosedMsg:
-		return m.handleAddContactClosedMsg(msg)
+	case addContactImportResultMsg:
+		return m.handleAddContactImportResult(msg)
+	case addContactLookupResultMsg:
+		return m.handleAddContactLookupResult(msg)
+	case addContactInviteExchangeResultMsg:
+		return m.handleAddContactInviteExchangeResult(msg)
+	case addContactInviteStartedMsg:
+		return m.handleAddContactInviteStarted(msg)
 	case addRelaySavedMsg:
 		return m.handleAddRelaySavedMsg(msg)
-	case addRelayClosedMsg:
-		return m.handleAddRelayClosedMsg(msg)
 	case contactRequestSendResultMsg:
 		return m.handleContactRequestSendResult(msg)
-	case contactRequestSendClosedMsg:
-		return m.handleContactRequestSendClosedMsg(msg)
 	case contactVerifyConfirmedMsg:
 		return m.handleContactVerifyConfirmedMsg(msg)
-	case contactVerifyClosedMsg:
-		return m.handleContactVerifyClosedMsg(msg)
 	case editRelaySavedMsg:
 		return m.handleEditRelaySavedMsg(msg)
-	case contactRequestsClosedMsg:
-		return m.handleContactRequestsClosedMsg(msg)
 	case contactRequestDecisionResultMsg:
 		return m.handleContactRequestDecisionResult(msg)
 	case filePickerClosedMsg:

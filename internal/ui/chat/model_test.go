@@ -425,21 +425,21 @@ func TestCommandPaletteOpensAddContactModalAndEscClosesIt(t *testing.T) {
 	model.SetSize(100, 20)
 
 	openPaletteCommand(t, model, "add contact")
-	if !model.addContact.open {
-		t.Fatal("expected add contact modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
+		t.Fatal("expected add contact view to open")
 	}
 	view := model.View()
-	if !strings.Contains(view, "Add Contact") {
-		t.Fatalf("expected add contact modal in view: %q", view)
+	if !strings.Contains(view, "Add contact") {
+		t.Fatalf("expected add contact breadcrumb in view: %q", view)
 	}
 
+	// Esc pops add-contact → Contacts → Pando root → close.
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	drainMsg(t, model, cmd)
-	if model.addContact.open {
-		t.Fatal("expected add contact modal to close")
-	}
-	if toast, _ := model.Toast(); toast != "add contact cancelled" {
-		t.Fatalf("unexpected toast: %q", toast)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after repeated esc")
 	}
 }
 
@@ -485,7 +485,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	}
 	drainMsg(t, model, cmd)
 
-	if model.addContact.open {
+	if model.commandPalette.open {
 		t.Fatal("expected add contact modal to close after import")
 	}
 	if model.peer.mailbox != "bob" {
@@ -591,7 +591,7 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 		t.Fatal("expected no preview when invite fails to parse")
 	}
 
-	if !model.addContact.open {
+	if model.commandPalette.activeViewID() != paletteViewAddContact {
 		t.Fatal("expected modal to stay open on error")
 	}
 	if model.addContact.value != badInvite {
@@ -1759,25 +1759,28 @@ func TestRenderMessagesUsesLocalTimezoneForHeaders(t *testing.T) {
 func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 	model := newHelpTestModel(t)
 
-	// "?" with empty input opens the overlay.
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	if !model.helpOpen {
-		t.Fatal("expected ? to open the help overlay")
+	// "?" with empty input opens the palette at the Help view.
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	drainMsg(t, model, cmd)
+	if !model.commandPalette.open || model.commandPalette.activeViewID() != paletteViewHelp {
+		t.Fatalf("expected ? to open the palette at help, got open=%v path=%v", model.commandPalette.open, model.commandPalette.path)
 	}
 	if !strings.Contains(model.View(), "Help") {
 		t.Fatalf("expected help title in view: %q", model.View())
 	}
 
-	// Esc closes it.
+	// Esc pops Help → Settings; second Esc closes the palette.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.helpOpen {
-		t.Fatal("expected esc to close the help overlay")
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected repeated esc to close the palette")
 	}
 
 	// Typing "?" in the input while editing a message must not open help.
 	model.input.SetValue("draft")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	if model.helpOpen {
+	if model.commandPalette.open {
 		t.Fatal("expected ? to be ignored while typing a message")
 	}
 }
@@ -1911,8 +1914,8 @@ func TestAddRelayModalSavesRelayProfile(t *testing.T) {
 	}
 
 	openPaletteCommand(t, model, "add relay")
-	if !model.addRelay.open {
-		t.Fatal("expected add relay modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddRelay {
+		t.Fatalf("expected palette at add-relay view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 	for _, text := range []string{"prod", "wss://relay.example/ws", "secret"} {
 		_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(text)})
@@ -1927,8 +1930,8 @@ func TestAddRelayModalSavesRelayProfile(t *testing.T) {
 		t.Fatal("expected add relay save message")
 	}
 	_, _ = model.Update(msg)
-	if model.addRelay.open {
-		t.Fatal("expected add relay modal to close after save")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after save")
 	}
 	if savedActive != "prod" {
 		t.Fatalf("expected new relay to become active, got %q", savedActive)
@@ -1960,8 +1963,8 @@ func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
 	if cmd != nil {
 		drainMsg(t, model, cmd)
 	}
-	if !model.addRelay.open || !model.addRelay.editing {
-		t.Fatal("expected edit relay modal to open")
+	if model.commandPalette.activeViewID() != paletteViewAddRelay || !model.addRelay.editing {
+		t.Fatalf("expected edit relay view to open, got id=%d editing=%v", model.commandPalette.activeViewID(), model.addRelay.editing)
 	}
 	if model.addRelay.inputs[0].Value() != "prod" {
 		t.Fatalf("expected relay form to load current name, got %q", model.addRelay.inputs[0].Value())
@@ -1990,8 +1993,8 @@ func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
 	}
 	_, next := model.Update(msg)
 	drainMsg(t, model, next)
-	if model.addRelay.open {
-		t.Fatal("expected edit relay modal to close after save")
+	if model.commandPalette.open {
+		t.Fatal("expected palette to close after edit save")
 	}
 	if savedActive != "edge" {
 		t.Fatalf("expected renamed relay to become active selection, got %q", savedActive)
@@ -2293,8 +2296,8 @@ func TestPeerDetailDrawerToggle(t *testing.T) {
 	model.SetSize(120, 24)
 
 	openPaletteCommand(t, model, "detail")
-	if !model.peerDetailOpen {
-		t.Fatal("expected palette command to open peer detail")
+	if model.commandPalette.activeViewID() != paletteViewPeerDetail {
+		t.Fatalf("expected palette at peer-detail view, got id=%d path=%v", model.commandPalette.activeViewID(), model.commandPalette.path)
 	}
 	view := model.View()
 	if !strings.Contains(view, "Peer detail") {
@@ -2305,9 +2308,12 @@ func TestPeerDetailDrawerToggle(t *testing.T) {
 		t.Fatalf("expected formatted fingerprint in drawer: %q", view)
 	}
 
+	// Esc pops peer-detail → Contacts → Pando; third Esc closes palette.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.peerDetailOpen {
-		t.Fatal("expected esc to close the drawer")
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected repeated esc to close the palette")
 	}
 }
 

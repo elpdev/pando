@@ -16,23 +16,8 @@ func (m *Model) openCommandPalette() tea.Cmd {
 
 func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd {
 	switch action.command {
-	case commandPaletteCommandAddContact:
-		m.openAddContactModal()
-		return nil
-	case commandPaletteCommandSendContactRequest:
-		return m.openContactRequestSendModal()
-	case commandPaletteCommandContactRequests:
-		m.openContactRequestsModal()
-		return nil
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()
-	case commandPaletteCommandPeerDetail:
-		if m.peer.mailbox != "" {
-			m.peerDetailOpen = true
-		}
-		return nil
-	case commandPaletteCommandVerifyContact:
-		return m.openContactVerifyModal()
 	case commandPaletteCommandThemes:
 		return m.applyPaletteTheme(action.themeName)
 	case commandPaletteCommandSwitchRelay:
@@ -43,12 +28,8 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return m.stopVoiceNotePlayback()
 	case commandPaletteCommandVoiceNotes:
 		return nil
-	case commandPaletteCommandAddRelay:
-		return m.openAddRelayModal()
 	case commandPaletteCommandRemoveRelay:
 		return m.removeRelayProfile(action.relayName)
-	case commandPaletteCommandEditRelay:
-		return m.openEditRelayModal(action.relayName)
 	case commandPaletteCommandMessageTTL:
 		return m.applyPaletteMessageTTL(action.messageTTL)
 	default:
