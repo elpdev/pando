@@ -389,7 +389,7 @@ func TestCommandPaletteOpensAddContactModalAndEscClosesIt(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	openPaletteCommand(t, model, "contact")
+	openPaletteCommand(t, model, "add contact")
 	if !model.addContact.open {
 		t.Fatal("expected add contact modal to open")
 	}
@@ -432,7 +432,7 @@ func TestAddContactModalImportsRawInviteAndActivatesChat(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	openPaletteCommand(t, model, "contact")
+	openPaletteCommand(t, model, "add contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(code), Paste: true})
 	// First ctrl+s parses the invite locally and shows a preview; no command.
@@ -506,7 +506,7 @@ func TestAddContactModalAcceptsVerboseInvitePaste(t *testing.T) {
 	})
 	model.SetSize(100, 20)
 
-	openPaletteCommand(t, model, "contact")
+	openPaletteCommand(t, model, "add contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(pasted), Paste: true})
 	// First ctrl+s parses; second ctrl+s commits.
@@ -543,7 +543,7 @@ func TestAddContactModalShowsDecodeErrorsAndKeepsInput(t *testing.T) {
 	model.SetSize(100, 20)
 	badInvite := "not a valid invite"
 
-	openPaletteCommand(t, model, "contact")
+	openPaletteCommand(t, model, "add contact")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("p")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(badInvite), Paste: true})
 	// With the preview step, a bad paste surfaces the decode error synchronously
@@ -1770,8 +1770,11 @@ func TestCommandPaletteFiltersByAlias(t *testing.T) {
 	if len(items) != 1 {
 		t.Fatalf("expected one visible command after alias filter, got %d", len(items))
 	}
-	if items[0].item.id != string(commandPaletteCommandThemes) {
-		t.Fatalf("expected themes command after alias filter, got %q", items[0].item.id)
+	if items[0].item.id != paletteNodeIDTheme {
+		t.Fatalf("expected theme node after alias filter, got %q", items[0].item.id)
+	}
+	if items[0].item.breadcrumb != "Settings" {
+		t.Fatalf("expected Settings breadcrumb on theme match, got %q", items[0].item.breadcrumb)
 	}
 }
 
@@ -1792,8 +1795,8 @@ func TestCommandPaletteAppliesAndPersistsTheme(t *testing.T) {
 	openPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if !model.commandPalette.open || model.commandPalette.mode != commandPaletteModeThemes {
-		t.Fatal("expected enter on themes command to open theme submenu")
+	if !model.commandPalette.open || !palettePathEquals(model.commandPalette.path, paletteNodeIDSettings, paletteNodeIDTheme) {
+		t.Fatalf("expected enter on themes command to drill into theme submenu, got path=%v", model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("classic")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1828,10 +1831,12 @@ func TestCommandPaletteSwitchesRelay(t *testing.T) {
 	}
 
 	openPalette(t, model)
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("relay")})
+	// "switch" at root resolves to `Relays › Switch relay` via cross-level
+	// search; Enter drills directly into the relay list.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("switch")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if model.commandPalette.mode != commandPaletteModeRelays {
-		t.Fatal("expected relay submenu to open")
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDRelays, paletteNodeIDSwitchRelay) {
+		t.Fatalf("expected to be inside switch-relay submenu, got path=%v", model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1912,8 +1917,8 @@ func TestEditRelayModalUpdatesActiveRelayProfile(t *testing.T) {
 	}
 
 	openPaletteCommand(t, model, "edit relay")
-	if model.commandPalette.mode != commandPaletteModeEditRelay {
-		t.Fatal("expected edit relay submenu to open")
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDRelays, paletteNodeIDEditRelay) {
+		t.Fatalf("expected edit relay submenu to open, got path=%v", model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("prod")})
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -1973,19 +1978,72 @@ func TestCommandPaletteEscReturnsFromThemeSubmenu(t *testing.T) {
 	openPalette(t, model)
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
-	if model.commandPalette.mode != commandPaletteModeThemes {
-		t.Fatal("expected theme submenu to open")
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDSettings, paletteNodeIDTheme) {
+		t.Fatalf("expected theme submenu to open, got path=%v", model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if !model.commandPalette.open {
 		t.Fatal("expected esc in theme submenu to keep palette open")
 	}
-	if model.commandPalette.mode != commandPaletteModeRoot {
-		t.Fatal("expected esc in theme submenu to return to root palette")
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDSettings) {
+		t.Fatalf("expected esc to unwind to settings, got path=%v", model.commandPalette.path)
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if !model.commandPalette.open || len(model.commandPalette.path) != 0 {
+		t.Fatalf("expected second esc to unwind to root, open=%v path=%v", model.commandPalette.open, model.commandPalette.path)
 	}
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if model.commandPalette.open {
-		t.Fatal("expected esc in root palette to close it")
+		t.Fatal("expected esc at root to close palette")
+	}
+}
+
+// palettePathEquals reports whether the current path stack matches the given
+// sequence of node ids.
+func palettePathEquals(got []string, want ...string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i, id := range got {
+		if id != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestCommandPaletteAttachFileHiddenWithoutPeer(t *testing.T) {
+	model := newHelpTestModel(t)
+	openPalette(t, model)
+	items := model.commandPalette.visibleItems(false)
+	for _, it := range items {
+		if it.item.id == string(commandPaletteCommandAttachFile) {
+			t.Fatalf("expected Attach file to be hidden without an active chat; got items=%v", items)
+		}
+	}
+}
+
+func TestCommandPaletteRootSearchDrillsIntoThemeSubmenu(t *testing.T) {
+	model := newHelpTestModel(t)
+	openPalette(t, model)
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("theme")})
+	visible := model.commandPalette.visibleItems(false)
+	var hit *commandPaletteVisibleItem
+	for i := range visible {
+		if visible[i].item.id == paletteNodeIDTheme && visible[i].item.breadcrumb == "Settings" {
+			hit = &visible[i]
+			break
+		}
+	}
+	if hit == nil {
+		t.Fatalf("expected 'Settings › Theme' breadcrumb match, got items=%v", visible)
+	}
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if !palettePathEquals(model.commandPalette.path, paletteNodeIDSettings, paletteNodeIDTheme) {
+		t.Fatalf("expected enter on breadcrumb to drill into theme submenu, got path=%v", model.commandPalette.path)
+	}
+	if !model.commandPalette.open {
+		t.Fatal("expected palette to remain open after drilling into submenu")
 	}
 }
 

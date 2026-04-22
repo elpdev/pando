@@ -179,7 +179,9 @@ func openAddContactViaPalette(t *testing.T, model *Model) {
 	t.Helper()
 	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
 	drainMsg(t, model, cmd)
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("contact")})
+	// "add contact" uniquely matches `Contacts › Add contact` in the palette's
+	// cross-level search, so Enter activates the leaf directly.
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("add contact")})
 	_, cmd = model.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	drainMsg(t, model, cmd)
 	if !model.addContact.open {

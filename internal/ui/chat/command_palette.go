@@ -9,17 +9,6 @@ import (
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
-type commandPaletteMode int
-
-const (
-	commandPaletteModeRoot commandPaletteMode = iota
-	commandPaletteModeThemes
-	commandPaletteModeRelays
-	commandPaletteModeRemoveRelay
-	commandPaletteModeEditRelay
-	commandPaletteModeMessageTTL
-)
-
 type commandPaletteCommand string
 
 const (
@@ -29,18 +18,27 @@ const (
 	commandPaletteCommandContactRequests    commandPaletteCommand = "contact-requests"
 	commandPaletteCommandPeerDetail         commandPaletteCommand = "peer-detail"
 	commandPaletteCommandVerifyContact      commandPaletteCommand = "verify-contact"
-	commandPaletteCommandRelays             commandPaletteCommand = "relays"
+	commandPaletteCommandSwitchRelay        commandPaletteCommand = "switch-relay"
 	commandPaletteCommandAddRelay           commandPaletteCommand = "add-relay"
 	commandPaletteCommandRemoveRelay        commandPaletteCommand = "remove-relay"
 	commandPaletteCommandEditRelay          commandPaletteCommand = "edit-relay"
-	commandPaletteCommandSwitchRelay        commandPaletteCommand = "switch-relay"
 	commandPaletteCommandThemes             commandPaletteCommand = "themes"
 	commandPaletteCommandMessageTTL         commandPaletteCommand = "message-ttl"
 )
 
-// messageTTLOptions are the choices shown in the Message TTL sub-mode. The
-// maximum of 24h is enforced by offering no larger option; users editing
-// config.yml directly are further clamped by config.EffectiveMessageTTL.
+// Node ids for structural tree groups. Leaf nodes reuse the command constants
+// above so palette_actions.go can continue to switch on the returned action.
+const (
+	paletteNodeIDContacts    = "contacts"
+	paletteNodeIDRelays      = "relays"
+	paletteNodeIDSettings    = "settings"
+	paletteNodeIDSwitchRelay = "switch-relay"
+	paletteNodeIDEditRelay   = "edit-relay"
+	paletteNodeIDRemoveRelay = "remove-relay"
+	paletteNodeIDTheme       = "theme"
+	paletteNodeIDMessageTTL  = "message-ttl"
+)
+
 var messageTTLOptions = []time.Duration{
 	1 * time.Hour,
 	6 * time.Hour,
@@ -58,12 +56,38 @@ type commandPaletteDeps struct {
 	saveMessageTTL    func(time.Duration) error
 }
 
+type paletteCtx struct {
+	hasPeer              bool
+	pendingRequestsCount int
+	deps                 commandPaletteDeps
+}
+
+// paletteNode describes one entry in the command tree. Groups carry children
+// and no action; leaves carry an action and no children. Nodes whose children
+// depend on runtime state (themes, saved relays, TTL options) set dynamic=true
+// so cross-level search stops at the group instead of flooding results with
+// every option.
+type paletteNode struct {
+	id       string
+	title    string
+	detail   string
+	meta     string
+	aliases  []string
+	visible  func(paletteCtx) bool
+	children func(paletteCtx) []paletteNode
+	action   *commandPaletteAction
+	dynamic  bool
+}
+
 type commandPaletteItem struct {
-	id      string
-	title   string
-	detail  string
-	meta    string
-	aliases []string
+	id         string
+	title      string
+	detail     string
+	meta       string
+	aliases    []string
+	breadcrumb string // parent path label shown before title in search results
+	node       paletteNode
+	nodePath   []string // full path (ids) from root to this node
 }
 
 type commandPaletteVisibleItem struct {
@@ -83,9 +107,11 @@ type commandPaletteModel struct {
 	hasPeer              bool
 	pendingRequestsCount int
 	open                 bool
-	mode                 commandPaletteMode
-	selected             int
-	filter               textinput.Model
+	// path is the stack of node ids from root to the current location. Empty
+	// path means the user is at the root level.
+	path     []string
+	selected int
+	filter   textinput.Model
 }
 
 func newCommandPaletteModel(deps commandPaletteDeps) commandPaletteModel {
@@ -98,7 +124,7 @@ func newCommandPaletteModel(deps commandPaletteDeps) commandPaletteModel {
 
 func (m *commandPaletteModel) Open() tea.Cmd {
 	m.open = true
-	m.mode = commandPaletteModeRoot
+	m.path = nil
 	m.selected = 0
 	m.filter.SetValue("")
 	return m.filter.Focus()
@@ -111,20 +137,32 @@ func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int
 
 func (m *commandPaletteModel) Close() {
 	m.open = false
-	m.mode = commandPaletteModeRoot
+	m.path = nil
 	m.selected = 0
 	m.filter.SetValue("")
 	m.filter.Blur()
 }
 
 func (m *commandPaletteModel) back() {
-	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeRelays || m.mode == commandPaletteModeRemoveRelay || m.mode == commandPaletteModeEditRelay || m.mode == commandPaletteModeMessageTTL {
-		m.mode = commandPaletteModeRoot
+	if len(m.path) > 0 {
+		m.path = m.path[:len(m.path)-1]
 		m.selected = 0
 		m.filter.SetValue("")
 		return
 	}
 	m.Close()
+}
+
+func (m *commandPaletteModel) ctx() paletteCtx {
+	return paletteCtx{
+		hasPeer:              m.hasPeer,
+		pendingRequestsCount: m.pendingRequestsCount,
+		deps:                 m.deps,
+	}
+}
+
+func (m *commandPaletteModel) atRoot() bool {
+	return len(m.path) == 0
 }
 
 func (m *commandPaletteModel) Update(msg tea.Msg) (*commandPaletteAction, tea.Cmd) {
@@ -169,60 +207,18 @@ func (m *commandPaletteModel) Update(msg tea.Msg) (*commandPaletteAction, tea.Cm
 }
 
 func (m *commandPaletteModel) activate(item commandPaletteItem) (*commandPaletteAction, tea.Cmd) {
-	switch m.mode {
-	case commandPaletteModeRoot:
-		if item.id == string(commandPaletteCommandThemes) {
-			m.mode = commandPaletteModeThemes
-			m.selected = 0
-			m.filter.SetValue("")
-			return nil, nil
-		}
-		if item.id == string(commandPaletteCommandRelays) {
-			m.mode = commandPaletteModeRelays
-			m.selected = 0
-			m.filter.SetValue("")
-			return nil, nil
-		}
-		if item.id == string(commandPaletteCommandRemoveRelay) {
-			m.mode = commandPaletteModeRemoveRelay
-			m.selected = 0
-			m.filter.SetValue("")
-			return nil, nil
-		}
-		if item.id == string(commandPaletteCommandEditRelay) {
-			m.mode = commandPaletteModeEditRelay
-			m.selected = 0
-			m.filter.SetValue("")
-			return nil, nil
-		}
-		if item.id == string(commandPaletteCommandMessageTTL) {
-			m.mode = commandPaletteModeMessageTTL
-			m.selected = 0
-			m.filter.SetValue("")
-			return nil, nil
-		}
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommand(item.id)}, nil
-	case commandPaletteModeThemes:
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommandThemes, themeName: item.id}, nil
-	case commandPaletteModeRelays:
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommandSwitchRelay, relayName: item.id}, nil
-	case commandPaletteModeRemoveRelay:
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommandRemoveRelay, relayName: item.id}, nil
-	case commandPaletteModeEditRelay:
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommandEditRelay, relayName: item.id}, nil
-	case commandPaletteModeMessageTTL:
-		ttl, err := time.ParseDuration(item.id)
-		if err != nil {
-			return nil, nil
-		}
-		m.Close()
-		return &commandPaletteAction{command: commandPaletteCommandMessageTTL, messageTTL: ttl}, nil
-	default:
+	node := item.node
+	if node.children != nil {
+		m.path = append([]string(nil), item.nodePath...)
+		m.selected = 0
+		m.filter.SetValue("")
 		return nil, nil
 	}
+	if node.action != nil {
+		action := *node.action
+		m.Close()
+		return &action, nil
+	}
+	m.Close()
+	return nil, nil
 }

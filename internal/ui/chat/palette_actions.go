@@ -35,7 +35,7 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 		return m.openContactVerifyModal()
 	case commandPaletteCommandThemes:
 		return m.applyPaletteTheme(action.themeName)
-	case commandPaletteCommandRelays, commandPaletteCommandSwitchRelay:
+	case commandPaletteCommandSwitchRelay:
 		return m.switchRelay(action.relayName)
 	case commandPaletteCommandAddRelay:
 		return m.openAddRelayModal()

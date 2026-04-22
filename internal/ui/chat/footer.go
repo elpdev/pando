@@ -71,10 +71,7 @@ func (m *Model) keyHintSegment() string {
 		return style.Muted.Render("type filter  up/down browse  enter select  backspace up  esc close")
 	}
 	if m.commandPalette.open {
-		if m.commandPalette.mode == commandPaletteModeThemes {
-			return style.Muted.Render("type filter  up/down browse  enter apply  esc back")
-		}
-		return style.Muted.Render("type filter  up/down browse  enter select  esc close")
+		return style.Muted.Render(strings.ReplaceAll(m.commandPalette.footer(), " · ", "  "))
 	}
 	if m.ui.focus == focusSidebar {
 		return style.Muted.Render("up/down browse  enter open  ctrl+p commands  tab chat  ? help")
