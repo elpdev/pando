@@ -15,5 +15,6 @@ type Client interface {
 	Connect(context.Context) error
 	Events() <-chan Event
 	Send(protocol.Envelope) error
+	Disconnect() error
 	Close() error
 }

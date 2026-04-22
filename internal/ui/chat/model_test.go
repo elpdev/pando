@@ -29,6 +29,7 @@ func (stubClient) Events() <-chan transport.Event {
 	return ch
 }
 func (stubClient) Send(protocol.Envelope) error { return nil }
+func (stubClient) Disconnect() error            { return nil }
 func (stubClient) Close() error                 { return nil }
 
 type recordingClient struct {
@@ -44,12 +45,22 @@ func (c *recordingClient) Send(envelope protocol.Envelope) error {
 	c.sent = append(c.sent, envelope)
 	return nil
 }
-func (c *recordingClient) Close() error { return nil }
+func (c *recordingClient) Disconnect() error { return nil }
+func (c *recordingClient) Close() error      { return nil }
 
 type switchClient struct {
 	name   string
 	closed bool
 	events chan transport.Event
+}
+
+type reconnectingClient struct {
+	connects    int
+	disconnects int
+	sent        []protocol.Envelope
+	events      chan transport.Event
+	connectErr  error
+	sendErr     error
 }
 
 type fakeVoicePlayer struct {
@@ -145,11 +156,47 @@ func newSwitchClient(name string) *switchClient {
 func (c *switchClient) Connect(context.Context) error  { return nil }
 func (c *switchClient) Events() <-chan transport.Event { return c.events }
 func (c *switchClient) Send(protocol.Envelope) error   { return nil }
+func (c *switchClient) Disconnect() error {
+	if !c.closed {
+		c.closed = true
+		close(c.events)
+	}
+	return nil
+}
 func (c *switchClient) Close() error {
 	if !c.closed {
 		c.closed = true
 		close(c.events)
 	}
+	return nil
+}
+
+func newReconnectingClient() *reconnectingClient {
+	return &reconnectingClient{events: make(chan transport.Event, 8)}
+}
+
+func (c *reconnectingClient) Connect(context.Context) error {
+	c.connects++
+	return c.connectErr
+}
+
+func (c *reconnectingClient) Events() <-chan transport.Event { return c.events }
+
+func (c *reconnectingClient) Send(envelope protocol.Envelope) error {
+	if c.sendErr != nil {
+		return c.sendErr
+	}
+	c.sent = append(c.sent, envelope)
+	return nil
+}
+
+func (c *reconnectingClient) Disconnect() error {
+	c.disconnects++
+	return nil
+}
+
+func (c *reconnectingClient) Close() error {
+	close(c.events)
 	return nil
 }
 
@@ -1600,6 +1647,82 @@ func TestConnectionStateReflectsFlags(t *testing.T) {
 	model.conn.authFailed = true
 	if got := model.ConnectionState(); got != ConnAuthFailed {
 		t.Fatalf("expected ConnAuthFailed, got %v", got)
+	}
+}
+
+func TestIdleDisconnectClosesActiveSocketWithoutReconnectLoop(t *testing.T) {
+	client := newReconnectingClient()
+	model := newDirectChatTestModel(t, client)
+	now := time.Now().UTC()
+	model.conn.idleTimeout = 30 * time.Second
+	model.conn.lastActivityAt = now.Add(-time.Minute)
+
+	_, cmd := model.handleTypingTickMsg(typingTickMsg(now))
+	if cmd == nil {
+		t.Fatal("expected idle disconnect command")
+	}
+
+	if !model.conn.idleDisconnected {
+		t.Fatal("expected idle disconnected state")
+	}
+	if model.conn.connected {
+		t.Fatal("expected model to be disconnected after idle timeout")
+	}
+	if !model.conn.disconnected {
+		t.Fatal("expected disconnected flag after idle timeout")
+	}
+	if model.conn.reconnectAttempt != 0 {
+		t.Fatalf("expected no reconnect attempt, got %d", model.conn.reconnectAttempt)
+	}
+	if model.conn.status != "idle; reconnect on send" {
+		t.Fatalf("unexpected idle disconnect status: %q", model.conn.status)
+	}
+	msg := model.idleDisconnectCmd()()
+	if _, ok := msg.(idleDisconnectResultMsg); !ok {
+		t.Fatalf("expected idleDisconnectResultMsg, got %T", msg)
+	}
+	if client.disconnects != 1 {
+		t.Fatalf("expected one disconnect call, got %d", client.disconnects)
+	}
+	if client.connects != 0 {
+		t.Fatalf("expected no reconnects during idle disconnect, got %d", client.connects)
+	}
+}
+
+func TestSendReconnectsAfterIdleDisconnect(t *testing.T) {
+	client := newReconnectingClient()
+	model := newDirectChatTestModel(t, client)
+	model.conn.connected = false
+	model.conn.disconnected = true
+	model.conn.idleDisconnected = true
+	model.conn.status = "idle; reconnect on send"
+
+	batch, err := model.messaging.EncryptOutgoing("bob", "hello again")
+	if err != nil {
+		t.Fatalf("encrypt outgoing: %v", err)
+	}
+	msg := model.sendCmd("bob", "hello again", batch)()
+	send, ok := msg.(sendResultMsg)
+	if !ok {
+		t.Fatalf("expected sendResultMsg, got %T", msg)
+	}
+	if send.err != nil {
+		t.Fatalf("unexpected send error: %v", send.err)
+	}
+	if !send.reconnected {
+		t.Fatal("expected send to reconnect first")
+	}
+	if _, _ = model.handleSendResultMsg(send); client.connects != 1 {
+		t.Fatalf("expected one reconnect attempt, got %d", client.connects)
+	}
+	if len(client.sent) == 0 {
+		t.Fatal("expected envelopes to be sent after reconnect")
+	}
+	if !model.conn.connected || model.conn.idleDisconnected {
+		t.Fatalf("expected connected state after send reconnect, got connected=%v idleDisconnected=%v", model.conn.connected, model.conn.idleDisconnected)
+	}
+	if model.conn.status != "connected as alice" {
+		t.Fatalf("unexpected status after reconnect send: %q", model.conn.status)
 	}
 }
 

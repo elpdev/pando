@@ -197,11 +197,13 @@ type DeviceConfig struct {
 	DefaultMailbox string         `yaml:"default_mailbox,omitempty"`
 	Theme          string         `yaml:"theme,omitempty"`
 	MessageTTL     time.Duration  `yaml:"message_ttl,omitempty"`
+	IdleTimeout    time.Duration  `yaml:"idle_timeout,omitempty"`
 }
 
 const (
 	DefaultMessageTTL = 24 * time.Hour
 	MaxMessageTTL     = 24 * time.Hour
+	MaxIdleTimeout    = 24 * time.Hour
 )
 
 // EffectiveMessageTTL returns the configured TTL clamped to (0, MaxMessageTTL].
@@ -215,6 +217,18 @@ func (c DeviceConfig) EffectiveMessageTTL() time.Duration {
 		return MaxMessageTTL
 	}
 	return c.MessageTTL
+}
+
+// EffectiveIdleTimeout returns the configured idle disconnect timeout.
+// Non-positive values disable idle disconnect; values above MaxIdleTimeout are capped.
+func (c DeviceConfig) EffectiveIdleTimeout() time.Duration {
+	if c.IdleTimeout <= 0 {
+		return 0
+	}
+	if c.IdleTimeout > MaxIdleTimeout {
+		return MaxIdleTimeout
+	}
+	return c.IdleTimeout
 }
 
 func (c DeviceConfig) RelayProfiles() []RelayProfile {

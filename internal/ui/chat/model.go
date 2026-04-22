@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -107,8 +108,10 @@ func New(deps Deps) *Model {
 		},
 		peer: peerState{mailbox: deps.RecipientMailbox},
 		conn: connectionState{
-			status:     fmt.Sprintf("connecting as %s", deps.Mailbox),
-			connecting: true,
+			status:         fmt.Sprintf("connecting as %s", deps.Mailbox),
+			connecting:     true,
+			idleTimeout:    deps.IdleDisconnectTimeout,
+			lastActivityAt: time.Now().UTC(),
 		},
 		msgs:          messageState{followLatest: true},
 		typing:        typingState{spinner: newTypingSpinner()},
@@ -299,6 +302,8 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleVoiceRecordingCanceledMsg(msg)
 	case typingSendResultMsg:
 		return m.handleTypingSendResultMsg(msg)
+	case idleDisconnectResultMsg:
+		return m.handleIdleDisconnectResultMsg(msg)
 	case roomHistorySyncResultMsg:
 		return m.handleRoomHistorySyncResultMsg(msg)
 	}
@@ -354,12 +359,21 @@ func (m *Model) sendCmd(recipient, body string, batch *messaging.OutgoingBatch) 
 		if batch == nil {
 			return sendResultMsg{recipient: recipient, body: body}
 		}
+		reconnected := false
+		if m.conn.idleDisconnected {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := m.client.Connect(ctx); err != nil {
+				return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment, err: err}
+			}
+			reconnected = true
+		}
 		for _, envelope := range batch.Envelopes {
 			if err := m.client.Send(envelope); err != nil {
 				return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment, err: err}
 			}
 		}
-		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment}
+		return sendResultMsg{recipient: recipient, messageID: batch.MessageID, body: body, attachment: batch.Attachment, reconnected: reconnected}
 	}
 }
 
@@ -368,11 +382,20 @@ func (m *Model) sendRoomCmd(roomID, body string, batch *messaging.OutgoingBatch)
 		if batch == nil {
 			return sendResultMsg{roomID: roomID, body: body}
 		}
+		reconnected := false
+		if m.conn.idleDisconnected {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := m.client.Connect(ctx); err != nil {
+				return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body, err: err}
+			}
+			reconnected = true
+		}
 		for _, envelope := range batch.Envelopes {
 			if err := m.client.Send(envelope); err != nil {
 				return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body, err: err}
 			}
 		}
-		return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body}
+		return sendResultMsg{roomID: roomID, messageID: batch.MessageID, body: body, reconnected: reconnected}
 	}
 }

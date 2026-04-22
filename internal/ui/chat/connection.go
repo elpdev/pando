@@ -12,6 +12,7 @@ import (
 
 func (m *Model) connectCmd() tea.Cmd {
 	m.conn.connecting = true
+	m.conn.disconnected = false
 	client := m.client
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -32,6 +33,7 @@ func (m *Model) reconnectCmd() tea.Cmd {
 	}
 	delay := time.Second * time.Duration(1<<shift)
 	m.conn.connecting = true
+	m.conn.idleDisconnected = false
 	m.conn.reconnectDelay = delay
 	m.conn.status = fmt.Sprintf("reconnecting in %s", delay)
 	client := m.client
@@ -61,6 +63,7 @@ func (m *Model) handleAuthFailure(err error) {
 	m.conn.connecting = false
 	m.conn.connected = false
 	m.conn.disconnected = true
+	m.conn.idleDisconnected = false
 	m.conn.authFailed = true
 	m.conn.status = fmt.Sprintf("relay auth failed: %v", err)
 	m.clearPeerTyping()
@@ -73,10 +76,38 @@ func (m *Model) markConnected(status string) {
 	m.conn.connected = true
 	m.conn.authFailed = false
 	m.conn.disconnected = false
+	m.conn.idleDisconnected = false
 	m.conn.reconnectAttempt = 0
 	m.conn.reconnectDelay = 0
+	m.noteActivity(time.Now().UTC())
 	m.syncInputPlaceholder()
 	m.conn.status = status
+}
+
+func (m *Model) idleDisconnectCmd() tea.Cmd {
+	client := m.client
+	return func() tea.Msg {
+		return idleDisconnectResultMsg{err: client.Disconnect()}
+	}
+}
+
+func (m *Model) markIdleDisconnected(now time.Time) {
+	m.conn.connecting = false
+	m.conn.connected = false
+	m.conn.disconnected = true
+	m.conn.idleDisconnected = true
+	m.conn.authFailed = false
+	m.conn.reconnectAttempt = 0
+	m.conn.reconnectDelay = 0
+	m.conn.lastActivityAt = now
+	m.conn.status = "idle; reconnect on send"
+	m.clearPeerTyping()
+	m.resetLocalTypingState()
+	m.syncInputPlaceholder()
+}
+
+func (m *Model) noteActivity(now time.Time) {
+	m.conn.lastActivityAt = now
 }
 
 func (m *Model) handleConnectionError(err error) tea.Cmd {
@@ -88,6 +119,7 @@ func (m *Model) handleConnectionError(err error) tea.Cmd {
 		m.conn.connecting = false
 		m.conn.connected = false
 		m.conn.disconnected = true
+		m.conn.idleDisconnected = false
 		m.conn.authFailed = false
 		m.conn.reconnectDelay = 0
 		m.conn.status = err.Error()
@@ -99,6 +131,7 @@ func (m *Model) handleConnectionError(err error) tea.Cmd {
 	m.conn.status = fmt.Sprintf("disconnected: %v", err)
 	m.conn.disconnected = true
 	m.conn.connected = false
+	m.conn.idleDisconnected = false
 	m.resetLocalTypingState()
 	return m.reconnectCmd()
 }

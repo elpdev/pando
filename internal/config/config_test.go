@@ -135,6 +135,42 @@ func TestDeviceConfigRoundTripIncludesMessageTTL(t *testing.T) {
 	}
 }
 
+func TestEffectiveIdleTimeout(t *testing.T) {
+	tests := []struct {
+		name string
+		ttl  time.Duration
+		want time.Duration
+	}{
+		{name: "unset disables idle timeout", ttl: 0, want: 0},
+		{name: "negative disables idle timeout", ttl: -time.Hour, want: 0},
+		{name: "configured value is honored", ttl: 15 * time.Minute, want: 15 * time.Minute},
+		{name: "above max is clamped", ttl: 48 * time.Hour, want: MaxIdleTimeout},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := DeviceConfig{IdleTimeout: tt.ttl}
+			if got := cfg.EffectiveIdleTimeout(); got != tt.want {
+				t.Fatalf("expected %s, got %s", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestDeviceConfigRoundTripIncludesIdleTimeout(t *testing.T) {
+	rootDir := t.TempDir()
+	want := DeviceConfig{IdleTimeout: 15 * time.Minute}
+	if err := SaveDeviceConfig(rootDir, want); err != nil {
+		t.Fatalf("save device config: %v", err)
+	}
+	got, err := LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	if got.IdleTimeout != want.IdleTimeout {
+		t.Fatalf("expected idle timeout %s, got %s", want.IdleTimeout, got.IdleTimeout)
+	}
+}
+
 func TestRelayStorePathUsesCentralizedPandoRoot(t *testing.T) {
 	got := RelayStorePath(filepath.Join("/media", "flash-drive", "pando-data"))
 	want := filepath.Join("/media", "flash-drive", "pando-data", "relay", "relay.db")

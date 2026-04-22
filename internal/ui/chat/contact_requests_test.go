@@ -25,7 +25,8 @@ func (failingClient) Events() <-chan transport.Event {
 func (failingClient) Send(protocol.Envelope) error {
 	return fmt.Errorf("network down")
 }
-func (failingClient) Close() error { return nil }
+func (failingClient) Disconnect() error { return nil }
+func (failingClient) Close() error      { return nil }
 
 func signDirectoryEntry(t *testing.T, id *identity.Identity) *relayapi.SignedDirectoryEntry {
 	t.Helper()

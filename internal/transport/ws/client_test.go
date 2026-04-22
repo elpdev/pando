@@ -155,6 +155,57 @@ func TestConnectRejectsInvalidRelayCAForTLS(t *testing.T) {
 	}
 }
 
+func TestDisconnectKeepsClientReusable(t *testing.T) {
+	server := httptest.NewServer(relay.NewServer(testLogger(), relay.NewMemoryQueueStore(), relay.Options{}).Handler())
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	aliceID, err := identity.New("alice")
+	if err != nil {
+		t.Fatalf("new alice identity: %v", err)
+	}
+	client := NewClient("ws"+strings.TrimPrefix(server.URL, "http")+"/ws", "", aliceID, relayclient.ClientOptions{})
+	defer client.Close()
+	publishDirectoryEntry(t, server, aliceID)
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("connect client: %v", err)
+	}
+	if err := client.Disconnect(); err != nil {
+		t.Fatalf("disconnect client: %v", err)
+	}
+
+	select {
+	case event := <-client.Events():
+		if event.Err != nil || event.Message != nil {
+			t.Fatalf("expected no disconnect event, got %+v", event)
+		}
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	if err := client.Connect(ctx); err != nil {
+		t.Fatalf("reconnect client: %v", err)
+	}
+	if err := client.Send(protocol.Envelope{SenderMailbox: "alice", RecipientMailbox: "alice", Body: "hello after reconnect"}); err != nil {
+		t.Fatalf("send after reconnect: %v", err)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-client.Events():
+			if event.Err != nil {
+				t.Fatalf("unexpected event error after reconnect: %v", event.Err)
+			}
+			if event.Message != nil && event.Message.Type == protocol.MessageTypeAck {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for ack after reconnect")
+		}
+	}
+}
+
 type testWriter struct{}
 
 func (testWriter) Write(p []byte) (n int, err error) {

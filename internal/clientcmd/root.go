@@ -88,16 +88,17 @@ func Execute(args []string) error {
 	}
 	client := ws.NewClient(cfg.RelayURL, cfg.RelayToken, service.Identity(), relayOptions)
 	chatModel := chat.New(chat.Deps{
-		Client:           client,
-		Messaging:        service,
-		VoicePlayer:      audio.NewPlayer(),
-		VoiceRecorder:    audio.NewRecorder(),
-		Mailbox:          cfg.Mailbox,
-		RecipientMailbox: cfg.RecipientMailbox,
-		RelayURL:         cfg.RelayURL,
-		RelayToken:       cfg.RelayToken,
-		RelayCAPath:      cfg.RelayCAPath,
-		RelayProfiles:    devCfg.RelayProfiles(),
+		Client:                client,
+		Messaging:             service,
+		VoicePlayer:           audio.NewPlayer(),
+		VoiceRecorder:         audio.NewRecorder(),
+		Mailbox:               cfg.Mailbox,
+		RecipientMailbox:      cfg.RecipientMailbox,
+		RelayURL:              cfg.RelayURL,
+		RelayToken:            cfg.RelayToken,
+		RelayCAPath:           cfg.RelayCAPath,
+		RelayProfiles:         devCfg.RelayProfiles(),
+		IdleDisconnectTimeout: devCfg.EffectiveIdleTimeout(),
 		SaveTheme: func(name string) error {
 			devCfg, err := config.LoadDeviceConfig(rootDir)
 			if err != nil {

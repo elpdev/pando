@@ -95,6 +95,8 @@ func (m *Model) guardCanSend() error {
 		return fmt.Errorf("select a contact from the sidebar first")
 	case m.peer.isRoom && !m.peer.joined:
 		return fmt.Errorf("join %s first", m.peer.label)
+	case m.conn.idleDisconnected:
+		return nil
 	case !m.conn.connected:
 		return fmt.Errorf("relay is not connected; waiting to reconnect")
 	default:
@@ -218,6 +220,7 @@ func (m *Model) handleClientEventMsg(msg clientEventMsg) (*Model, tea.Cmd) {
 		return m, m.handleConnectionError(event.Err)
 	}
 	if event.Message != nil {
+		m.noteActivity(time.Now().UTC())
 		m.handleProtocolMessage(*event.Message)
 	}
 	return m, m.waitForEvent()
@@ -259,7 +262,12 @@ func (m *Model) handleTypingTickMsg(msg typingTickMsg) (*Model, tea.Cmd) {
 		m.clearRoomSync()
 		m.pushToast("room history sync timed out", ToastWarn)
 	}
-	return m, tea.Batch(m.typingTickCmd(), spCmd, cmd)
+	var idleCmd tea.Cmd
+	if m.conn.connected && m.conn.idleTimeout > 0 && !m.conn.lastActivityAt.IsZero() && now.Sub(m.conn.lastActivityAt) >= m.conn.idleTimeout {
+		m.markIdleDisconnected(now)
+		idleCmd = m.idleDisconnectCmd()
+	}
+	return m, tea.Batch(m.typingTickCmd(), spCmd, cmd, idleCmd)
 }
 
 func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
@@ -270,6 +278,10 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 		m.pushToast(fmt.Sprintf("send failed: %v", msg.err), ToastBad)
 		return m, nil
 	}
+	if msg.reconnected {
+		m.markConnected(fmt.Sprintf("connected as %s", m.mailbox))
+	}
+	m.noteActivity(time.Now().UTC())
 	if msg.roomID != "" {
 		if msg.body != "" {
 			if err := m.messaging.SaveDefaultRoomSent(msg.messageID, msg.body); err != nil {
@@ -301,6 +313,15 @@ func (m *Model) handleSendResultMsg(msg sendResultMsg) (*Model, tea.Cmd) {
 func (m *Model) handleTypingSendResultMsg(msg typingSendResultMsg) (*Model, tea.Cmd) {
 	if msg.err != nil {
 		m.pushToast(fmt.Sprintf("typing indicator failed: %v", msg.err), ToastBad)
+		return m, nil
+	}
+	m.noteActivity(time.Now().UTC())
+	return m, nil
+}
+
+func (m *Model) handleIdleDisconnectResultMsg(msg idleDisconnectResultMsg) (*Model, tea.Cmd) {
+	if msg.err != nil {
+		m.pushToast(fmt.Sprintf("idle disconnect failed: %v", msg.err), ToastBad)
 	}
 	return m, nil
 }

@@ -21,6 +21,7 @@ type Deps struct {
 	RelayToken            string
 	RelayCAPath           string
 	RelayProfiles         []config.RelayProfile
+	IdleDisconnectTimeout time.Duration
 	RelayClientFactory    func(url, token string) (RelayClient, error)
 	RelayTransportFactory func(url, token string) transport.Client
 	SaveTheme             func(name string) error
@@ -166,6 +167,7 @@ type reconnectResultMsg struct {
 	client transport.Client
 	err    error
 }
+type idleDisconnectResultMsg struct{ err error }
 type typingTickMsg time.Time
 type typingSendResultMsg struct{ err error }
 type roomHistorySyncResultMsg struct {
@@ -183,12 +185,13 @@ type editRelaySavedMsg struct {
 }
 
 type sendResultMsg struct {
-	recipient  string
-	roomID     string
-	messageID  string
-	body       string
-	attachment *store.AttachmentRecord
-	err        error
+	recipient   string
+	roomID      string
+	messageID   string
+	body        string
+	attachment  *store.AttachmentRecord
+	reconnected bool
+	err         error
 }
 
 type voicePlaybackResultMsg struct {

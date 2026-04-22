@@ -136,6 +136,21 @@ func (c *Client) Send(envelope protocol.Envelope) error {
 	})
 }
 
+func (c *Client) Disconnect() error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return nil
+	}
+	conn := c.conn
+	c.conn = nil
+	c.mu.Unlock()
+	if conn != nil {
+		return conn.Close()
+	}
+	return nil
+}
+
 func (c *Client) Close() error {
 	c.mu.Lock()
 	if c.closed {
@@ -168,10 +183,15 @@ func (c *Client) readLoop() {
 		var msg protocol.Message
 		if err := conn.ReadJSON(&msg); err != nil {
 			c.mu.Lock()
-			if c.conn == conn {
+			activeConn := c.conn
+			if activeConn == conn {
 				c.conn = nil
 			}
+			closed := c.closed
 			c.mu.Unlock()
+			if activeConn != conn || closed {
+				return
+			}
 			c.sendEvent(transport.Event{Err: err})
 			return
 		}

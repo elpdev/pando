@@ -35,9 +35,12 @@ type connectionState struct {
 	connecting       bool
 	connected        bool
 	disconnected     bool
+	idleDisconnected bool
 	authFailed       bool
 	reconnectAttempt int
 	reconnectDelay   time.Duration
+	idleTimeout      time.Duration
+	lastActivityAt   time.Time
 }
 
 type messageState struct {

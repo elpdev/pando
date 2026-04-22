@@ -25,7 +25,7 @@ func (m *Model) typingTickCmd() tea.Cmd {
 }
 
 func (m *Model) sendTypingCmd(recipient, state string) tea.Cmd {
-	if recipient == "" || m.peer.isRoom || m.guardCanSend() != nil {
+	if recipient == "" || m.peer.isRoom || m.conn.idleDisconnected || m.guardCanSend() != nil {
 		return nil
 	}
 	return func() tea.Msg {
@@ -50,6 +50,7 @@ func (m *Model) handleInputActivity(previousValue, currentValue string) tea.Cmd 
 		return nil
 	}
 	now := time.Now().UTC()
+	m.noteActivity(now)
 	if strings.TrimSpace(currentValue) == "" {
 		if !m.typing.localSent || m.typing.localPeer != m.peer.mailbox {
 			m.resetLocalTypingState()
