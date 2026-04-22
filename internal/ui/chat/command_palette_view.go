@@ -7,9 +7,12 @@ import (
 	"github.com/elpdev/pando/internal/ui/style"
 )
 
-func (m commandPaletteModel) View(width, height int, peerLabel string) string {
+// View renders the palette as a floating overlay on top of the provided base
+// view. The surrounding chat view keeps rendering so the user never loses
+// context while the palette is open.
+func (m commandPaletteModel) View(base string, width, height int, peerLabel string) string {
 	if !m.open {
-		return ""
+		return base
 	}
 	bodyWidth := max(1, paletteWidth(width)-6)
 	m.filter.Width = max(1, bodyWidth-2)
@@ -20,73 +23,92 @@ func (m commandPaletteModel) View(width, height int, peerLabel string) string {
 		lines = append(lines, style.Muted.Render("No commands match this search."))
 	} else {
 		for idx, item := range items {
-			lines = append(lines, renderPaletteListItemMatched(bodyWidth, idx == m.selected, item.item.title, item.item.detail, item.item.meta, item.matched))
+			title := item.item.title
+			if item.item.breadcrumb != "" {
+				title = style.Muted.Render(item.item.breadcrumb+" › ") + title
+			}
+			lines = append(lines, renderPaletteListItemMatched(bodyWidth, idx == m.selected, title, item.item.detail, item.item.meta, item.matched))
 		}
 	}
-	return renderPaletteOverlay(width, height, m.title(), m.subtitle(peerLabel), []string{strings.Join(lines, "\n")}, m.footer())
+	return renderFloatingPaletteOverlay(base, width, height, m.title(), m.subtitle(peerLabel), []string{strings.Join(lines, "\n")}, m.footer())
 }
 
 func (m commandPaletteModel) title() string {
-	switch m.mode {
-	case commandPaletteModeThemes:
-		return "Themes"
-	case commandPaletteModeMessageTTL:
-		return "Message TTL"
+	parts := []string{"Pando"}
+	ctx := m.ctx()
+	nodes := rootNodes(ctx)
+	for _, id := range m.path {
+		node, ok := findNode(nodes, id, ctx)
+		if !ok {
+			parts = append(parts, id)
+			break
+		}
+		parts = append(parts, node.title)
+		if node.children == nil {
+			break
+		}
+		nodes = node.children(ctx)
 	}
-	if m.mode == commandPaletteModeRelays {
-		return "Relays"
-	}
-	if m.mode == commandPaletteModeRemoveRelay {
-		return "Remove Relay"
-	}
-	if m.mode == commandPaletteModeEditRelay {
-		return "Edit Relay"
-	}
-	return "Pando"
+	return strings.Join(parts, " › ")
 }
 
 func (m commandPaletteModel) subtitle(peerLabel string) string {
-	switch m.mode {
-	case commandPaletteModeThemes:
-		current := m.currentThemeName()
+	if m.atRoot() {
+		if m.hasPeer {
+			return fmt.Sprintf("Jump to actions for %s or the current session.", peerLabel)
+		}
+		return "Search for a command or browse the available actions."
+	}
+	node, ok := m.nodeAtPath(m.path)
+	if !ok {
+		return ""
+	}
+	switch node.id {
+	case paletteNodeIDTheme:
+		current := currentThemeLabel(m.ctx())
 		if current == "" {
 			return "Choose a theme and apply it immediately."
 		}
 		return fmt.Sprintf("Choose a theme. Current: %s", current)
-	case commandPaletteModeMessageTTL:
-		return fmt.Sprintf("Messages self-destruct after this duration on both sides. Current: %s", formatMessageTTL(m.currentMessageTTLValue()))
-	}
-	if m.mode == commandPaletteModeRelays {
-		current := m.currentRelayName()
+	case paletteNodeIDMessageTTL:
+		return fmt.Sprintf("Messages self-destruct after this duration on both sides. Current: %s", formatMessageTTL(currentTTL(m.ctx())))
+	case paletteNodeIDSwitchRelay:
+		current := ""
+		if m.deps.currentRelayName != nil {
+			current = m.deps.currentRelayName()
+		}
 		if current == "" {
 			return "Choose the active relay for this device."
 		}
 		return fmt.Sprintf("Choose the active relay. Current: %s", current)
-	}
-	if m.mode == commandPaletteModeRemoveRelay {
+	case paletteNodeIDEditRelay:
+		return "Choose a saved relay profile to update its name, URL, or token."
+	case paletteNodeIDRemoveRelay:
 		return "Remove a saved relay profile. The active relay cannot leave you with none saved."
 	}
-	if m.mode == commandPaletteModeEditRelay {
-		return "Choose a saved relay profile to update its name, URL, or token."
+	if node.detail != "" {
+		return node.detail
 	}
-	if m.hasPeer {
-		return fmt.Sprintf("Jump to actions for %s or the current session.", peerLabel)
-	}
-	return "Search for a command or browse the available actions."
+	return ""
 }
 
 func (m commandPaletteModel) footer() string {
-	if m.mode == commandPaletteModeThemes || m.mode == commandPaletteModeMessageTTL {
+	if m.atRoot() {
+		return "type filter · up/down browse · enter select · esc close"
+	}
+	node, ok := m.nodeAtPath(m.path)
+	if !ok {
+		return "type filter · up/down browse · enter select · esc back"
+	}
+	switch node.id {
+	case paletteNodeIDTheme, paletteNodeIDMessageTTL:
 		return "type filter · up/down browse · enter apply · esc back"
-	}
-	if m.mode == commandPaletteModeRelays {
+	case paletteNodeIDSwitchRelay:
 		return "type filter · up/down browse · enter switch · esc back"
-	}
-	if m.mode == commandPaletteModeRemoveRelay {
+	case paletteNodeIDEditRelay:
+		return "type filter · up/down browse · enter edit · esc back"
+	case paletteNodeIDRemoveRelay:
 		return "type filter · up/down browse · enter remove · esc back"
 	}
-	if m.mode == commandPaletteModeEditRelay {
-		return "type filter · up/down browse · enter edit · esc back"
-	}
-	return "type filter · up/down browse · enter select · esc close"
+	return "type filter · up/down browse · enter select · esc back"
 }
