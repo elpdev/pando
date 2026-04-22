@@ -17,9 +17,12 @@ type contactRequestsDeps struct {
 	decide func(req store.ContactRequest, accept bool) tea.Cmd
 }
 
+// contactRequestsModal renders the Contact requests inbox inside the command
+// palette. Items live on the struct between renders so background updates
+// (loadContactRequests, handleContactRequestUpdate) can mutate the list even
+// while the view is not active.
 type contactRequestsModal struct {
 	deps     contactRequestsDeps
-	open     bool
 	items    []store.ContactRequest
 	selected int
 	busy     bool
@@ -33,22 +36,19 @@ type contactRequestDecisionResultMsg struct {
 	err      error
 }
 
-type contactRequestsClosedMsg struct{}
-
 func newContactRequestsModal(deps contactRequestsDeps) contactRequestsModal {
 	return contactRequestsModal{deps: deps}
 }
 
-func (m *contactRequestsModal) Open(items []store.ContactRequest) {
-	m.open = true
-	m.items = sortContactRequests(items)
+func (m *contactRequestsModal) Open(viewOpenCtx) tea.Cmd {
+	m.items = sortContactRequests(m.items)
 	m.selected = m.firstPendingIncoming()
 	m.busy = false
 	m.error = ""
+	return nil
 }
 
 func (m *contactRequestsModal) Close() {
-	m.open = false
 	m.busy = false
 	m.error = ""
 }
@@ -108,27 +108,33 @@ func countPendingIncoming(items []store.ContactRequest) int {
 	return count
 }
 
-func (m *Model) openContactRequestsModal() {
-	m.contactRequests.Open(m.contactRequests.items)
-	m.input.Blur()
-}
-
-func (m *Model) closeContactRequestsModal() {
-	m.contactRequests.Close()
-	if m.peer.mailbox != "" {
-		m.input.Focus()
-	}
-}
-
 func (m *contactRequestsModal) Update(msg tea.Msg) (bool, tea.Cmd) {
-	if !m.open {
-		return false, nil
-	}
 	keyMsg, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return false, nil
 	}
-	return true, m.updateKey(keyMsg)
+	if m.busy {
+		return true, nil
+	}
+	switch keyMsg.Type {
+	case tea.KeyUp:
+		m.moveSelection(-1)
+		return true, nil
+	case tea.KeyDown:
+		m.moveSelection(1)
+		return true, nil
+	case tea.KeyEnter:
+		return true, m.activate(true)
+	}
+	switch strings.ToLower(keyMsg.String()) {
+	case "a", "y":
+		return true, m.activate(true)
+	case "r", "x", "n":
+		return true, m.activate(false)
+	case "q":
+		return true, paletteBackCmd()
+	}
+	return true, nil
 }
 
 // applyDecisionResult updates modal state after an accept/reject command
@@ -152,33 +158,6 @@ func (m *contactRequestsModal) applyDecisionResult(msg contactRequestDecisionRes
 	}
 	m.items = sortContactRequests(m.items)
 	m.selected = m.firstPendingIncoming()
-}
-
-func (m *contactRequestsModal) updateKey(msg tea.KeyMsg) tea.Cmd {
-	if m.busy {
-		return nil
-	}
-	switch msg.Type {
-	case tea.KeyEsc:
-		return closeContactRequestsCmd()
-	case tea.KeyUp:
-		m.moveSelection(-1)
-		return nil
-	case tea.KeyDown:
-		m.moveSelection(1)
-		return nil
-	case tea.KeyEnter:
-		return m.activate(true)
-	}
-	switch strings.ToLower(msg.String()) {
-	case "a", "y":
-		return m.activate(true)
-	case "r", "x", "n":
-		return m.activate(false)
-	case "q":
-		return closeContactRequestsCmd()
-	}
-	return nil
 }
 
 func (m *contactRequestsModal) moveSelection(delta int) {
@@ -215,12 +194,6 @@ func (m *contactRequestsModal) activate(accept bool) tea.Cmd {
 	m.busy = true
 	m.error = ""
 	return m.deps.decide(*req, accept)
-}
-
-func closeContactRequestsCmd() tea.Cmd {
-	return func() tea.Msg {
-		return contactRequestsClosedMsg{}
-	}
 }
 
 // makeContactRequestDecision builds the tea.Cmd that sends accept/reject
@@ -277,11 +250,6 @@ const (
 	contactRequestDecisionAccept = "accept"
 	contactRequestDecisionReject = "reject"
 )
-
-func (m *Model) handleContactRequestsClosedMsg(_ contactRequestsClosedMsg) (*Model, tea.Cmd) {
-	m.closeContactRequestsModal()
-	return m, nil
-}
 
 func (m *Model) handleContactRequestDecisionResult(msg contactRequestDecisionResultMsg) (*Model, tea.Cmd) {
 	m.contactRequests.applyDecisionResult(msg)
@@ -352,20 +320,16 @@ func (m *Model) handleContactRequestUpdate(req *store.ContactRequest) {
 	}
 }
 
-func (m contactRequestsModal) Overlay(width, height int) string {
-	modalWidth := paletteWidth(width)
-	modalHeight := paletteHeight(height)
-	if modalWidth <= 0 || modalHeight <= 0 {
-		return ""
-	}
-	bodyParts := []string{m.renderBody(modalWidth - 6)}
+func (m *contactRequestsModal) Body(width int) string {
+	bodyWidth := max(1, width)
+	parts := []string{m.renderBody(bodyWidth)}
 	if m.error != "" {
-		bodyParts = append(bodyParts, style.StatusBad.Width(modalWidth-6).Render(m.error))
+		parts = append(parts, style.StatusBad.Width(bodyWidth).Render(m.error))
 	}
-	return renderPaletteOverlay(width, height, "Contact Requests", m.subtitle(), bodyParts, m.footer())
+	return strings.Join(parts, "\n\n")
 }
 
-func (m contactRequestsModal) subtitle() string {
+func (m *contactRequestsModal) Subtitle() string {
 	if len(m.items) == 0 {
 		return "No contact requests yet."
 	}
@@ -379,7 +343,7 @@ func (m contactRequestsModal) subtitle() string {
 	return fmt.Sprintf("%d incoming requests waiting for your decision.", pending)
 }
 
-func (m contactRequestsModal) footer() string {
+func (m *contactRequestsModal) Footer() string {
 	if m.busy {
 		return "working..."
 	}

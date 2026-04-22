@@ -30,9 +30,6 @@ func (m *Model) View() string {
 	if m.addContact.open {
 		return m.clearInlineMedia(m.addContact.Overlay(view, m.ui.width, m.ui.height))
 	}
-	if m.contactRequests.open {
-		return m.clearInlineMedia(m.contactRequests.Overlay(m.ui.width, m.ui.height))
-	}
 	if m.commandPalette.open {
 		return m.clearInlineMedia(m.commandPalette.View(view, m.ui.width, m.ui.height, m.PeerLabel()))
 	}

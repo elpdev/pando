@@ -282,7 +282,7 @@ func contactsNode(ctx paletteCtx) paletteNode {
 					detail:  "Review pending requests to connect, then accept or reject them.",
 					meta:    contactRequestsPaletteMeta(c.pendingRequestsCount),
 					aliases: []string{"requests", "inbox", "pending", "accept", "reject"},
-					action:  &commandPaletteAction{command: commandPaletteCommandContactRequests},
+					view:    paletteViewContactRequests,
 				},
 			}
 			if c.hasPeer {

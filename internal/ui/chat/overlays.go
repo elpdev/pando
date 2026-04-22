@@ -8,11 +8,6 @@ import (
 )
 
 func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
-	if m.contactRequests.open {
-		if handled, cmd := m.contactRequests.Update(msg); handled {
-			return true, cmd
-		}
-	}
 	if m.addContact.open {
 		if handled, cmd := m.addContact.Update(msg); handled {
 			return true, cmd
