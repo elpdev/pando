@@ -56,7 +56,7 @@ func runHelp(args []string) error {
 	case "config":
 		return fmt.Errorf("usage: pando config <show|set> [flags]")
 	case "eject":
-		return fmt.Errorf("usage: pando eject --mailbox <mailbox> [flags]")
+		return fmt.Errorf("usage: pando eject [-mailbox <mailbox>] [-flash-drive <path>] [flags]")
 	default:
 		return fmt.Errorf("unknown help topic %q", args[0])
 	}

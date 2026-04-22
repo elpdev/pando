@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/elpdev/pando/internal/config"
 	"github.com/elpdev/pando/internal/identity"
 	"github.com/elpdev/pando/internal/invite"
 	"github.com/elpdev/pando/internal/messaging"
@@ -67,7 +68,7 @@ func TestEjectConfirmation(t *testing.T) {
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdin = r
-	if _, err := w.WriteString(mailbox + "\n"); err != nil {
+	if _, err := w.WriteString("\n" + mailbox + "\n"); err != nil {
 		t.Fatalf("write stdin: %v", err)
 	}
 	w.Close()
@@ -96,7 +97,7 @@ func TestEjectConfirmationAbort(t *testing.T) {
 		t.Fatalf("pipe: %v", err)
 	}
 	os.Stdin = r
-	if _, err := w.WriteString("wrong-mailbox\n"); err != nil {
+	if _, err := w.WriteString("\nwrong-mailbox\n"); err != nil {
 		t.Fatalf("write stdin: %v", err)
 	}
 	w.Close()
@@ -109,6 +110,137 @@ func TestEjectConfirmationAbort(t *testing.T) {
 	// Data dir should still exist.
 	if _, statErr := os.Stat(dataDir); statErr != nil {
 		t.Fatalf("expected data dir to survive aborted eject: %v", statErr)
+	}
+}
+
+func TestEjectAllIdentities(t *testing.T) {
+	rootDir := t.TempDir()
+	aliceDir := config.ClientDataDir(rootDir, "alice")
+	bobDir := config.ClientDataDir(rootDir, "bob")
+	if _, _, err := store.NewClientStore(aliceDir).LoadOrCreateIdentity("alice"); err != nil {
+		t.Fatalf("create alice identity: %v", err)
+	}
+	if _, _, err := store.NewClientStore(bobDir).LoadOrCreateIdentity("bob"); err != nil {
+		t.Fatalf("create bob identity: %v", err)
+	}
+	if err := config.SaveDeviceConfig(rootDir, config.DeviceConfig{DefaultMailbox: "alice"}); err != nil {
+		t.Fatalf("save device config: %v", err)
+	}
+
+	if err := runEject([]string{"-root-dir", rootDir, "-force"}); err != nil {
+		t.Fatalf("eject all: %v", err)
+	}
+
+	if _, err := os.Stat(aliceDir); !os.IsNotExist(err) {
+		t.Fatalf("expected alice identity dir removed, got %v", err)
+	}
+	if _, err := os.Stat(bobDir); !os.IsNotExist(err) {
+		t.Fatalf("expected bob identity dir removed, got %v", err)
+	}
+	devCfg, err := config.LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	if devCfg.DefaultMailbox != "" {
+		t.Fatalf("expected default mailbox cleared, got %q", devCfg.DefaultMailbox)
+	}
+}
+
+func TestEjectSingleIdentityToFlashDrive(t *testing.T) {
+	rootDir := t.TempDir()
+	flashDrive := t.TempDir()
+	mailbox := "dina"
+	dataDir := config.ClientDataDir(rootDir, mailbox)
+	if _, _, err := store.NewClientStore(dataDir).LoadOrCreateIdentity(mailbox); err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	if err := config.SaveDeviceConfig(rootDir, config.DeviceConfig{DefaultMailbox: mailbox}); err != nil {
+		t.Fatalf("save device config: %v", err)
+	}
+
+	if err := runEject([]string{"-root-dir", rootDir, "-mailbox", mailbox, "-flash-drive", flashDrive, "-force"}); err != nil {
+		t.Fatalf("eject to flash drive: %v", err)
+	}
+
+	flashIdentity := filepath.Join(flashDrive, "pando", "clients", mailbox, "identity.json")
+	if _, err := os.Stat(flashIdentity); err != nil {
+		t.Fatalf("expected copied identity on flash drive: %v", err)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("expected original identity dir removed, got %v", err)
+	}
+	devCfg, err := config.LoadDeviceConfig(rootDir)
+	if err != nil {
+		t.Fatalf("load device config: %v", err)
+	}
+	if devCfg.DefaultMailbox != "" {
+		t.Fatalf("expected default mailbox cleared, got %q", devCfg.DefaultMailbox)
+	}
+}
+
+func TestEjectSelectsDiscoveredFlashDrive(t *testing.T) {
+	rootDir := t.TempDir()
+	flashRoot := t.TempDir()
+	flashDrive := filepath.Join(flashRoot, "PANDO_USB")
+	if err := os.MkdirAll(flashDrive, 0o700); err != nil {
+		t.Fatalf("create flash drive dir: %v", err)
+	}
+	mailbox := "erin"
+	dataDir := config.ClientDataDir(rootDir, mailbox)
+	if _, _, err := store.NewClientStore(dataDir).LoadOrCreateIdentity(mailbox); err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	origRoots := flashDriveSearchRoots
+	flashDriveSearchRoots = func() []string { return []string{flashRoot} }
+	t.Cleanup(func() { flashDriveSearchRoots = origRoots })
+
+	withPatchedStdin(t, "1\n"+mailbox+"\n", func() {
+		if err := runEject([]string{"-root-dir", rootDir, "-mailbox", mailbox}); err != nil {
+			t.Fatalf("eject with selected flash drive: %v", err)
+		}
+	})
+
+	flashIdentity := filepath.Join(flashDrive, "pando", "clients", mailbox, "identity.json")
+	if _, err := os.Stat(flashIdentity); err != nil {
+		t.Fatalf("expected copied identity on selected flash drive: %v", err)
+	}
+	if _, err := os.Stat(dataDir); !os.IsNotExist(err) {
+		t.Fatalf("expected original identity dir removed, got %v", err)
+	}
+}
+
+func TestEjectRejectsInvalidFlashDriveSelection(t *testing.T) {
+	rootDir := t.TempDir()
+	flashRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(flashRoot, "PANDO_USB"), 0o700); err != nil {
+		t.Fatalf("create flash drive dir: %v", err)
+	}
+	mailbox := "frank"
+	dataDir := config.ClientDataDir(rootDir, mailbox)
+	if _, _, err := store.NewClientStore(dataDir).LoadOrCreateIdentity(mailbox); err != nil {
+		t.Fatalf("create identity: %v", err)
+	}
+	origRoots := flashDriveSearchRoots
+	flashDriveSearchRoots = func() []string { return []string{flashRoot} }
+	t.Cleanup(func() { flashDriveSearchRoots = origRoots })
+
+	withPatchedStdin(t, "9\n", func() {
+		err := runEject([]string{"-root-dir", rootDir, "-mailbox", mailbox})
+		if err == nil || !strings.Contains(err.Error(), "invalid flash drive selection") {
+			t.Fatalf("expected invalid flash drive selection error, got %v", err)
+		}
+	})
+
+	if _, err := os.Stat(dataDir); err != nil {
+		t.Fatalf("expected original identity dir preserved: %v", err)
+	}
+}
+
+func TestEjectAllWithDataDirRequiresMailbox(t *testing.T) {
+	rootDir := t.TempDir()
+	err := runEject([]string{"-root-dir", rootDir, "-data-dir", filepath.Join(rootDir, "clients", "alice"), "-force"})
+	if err == nil || !strings.Contains(err.Error(), "-data-dir requires -mailbox") {
+		t.Fatalf("expected data-dir requires mailbox error, got %v", err)
 	}
 }
 
