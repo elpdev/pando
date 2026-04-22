@@ -3,6 +3,7 @@ package chat
 import (
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/ui/style"
 )
@@ -14,27 +15,45 @@ type helpShortcut struct {
 
 var helpSectionNavigation = []helpShortcut{{"↑ ↓", "browse contacts or draft history"}, {"pgup / pgdn", "scroll messages"}, {"home / end", "jump transcript top/bottom"}, {"tab", "switch pane"}, {"ctrl+c", "quit"}}
 
-var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+p", "open command palette"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "clear attachment or close overlay"}, {"?", "toggle this help"}}
+var helpSectionMessaging = []helpShortcut{{"enter", "send / open selected chat"}, {"shift+enter", "insert newline"}, {"ctrl+p", "open command palette"}, {"/send-photo <path>", "queue photo via path"}, {"/send-voice <path>", "queue voice via path"}, {"/send-file <path>", "queue file via path"}, {"esc", "back / close overlay"}, {"?", "toggle this help"}}
 
-func (m *Model) renderHelpModal(_ string) string {
-	modalWidth := min(max(64, m.ui.width*2/3), max(40, m.ui.width-6))
-	modalHeight := min(max(18, m.ui.height*2/3), max(14, m.ui.height-4))
-	if modalWidth <= 0 || modalHeight <= 0 {
-		return ""
+type helpView struct{}
+
+func (helpView) Open(viewOpenCtx) tea.Cmd { return nil }
+
+func (helpView) Close() {}
+
+func (helpView) Update(msg tea.Msg) (bool, tea.Cmd) {
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return false, nil
 	}
-	colWidth := max(20, (modalWidth-6)/2)
-	title := style.ModalTitle.Render("Help")
+	switch {
+	case key.Type == tea.KeyCtrlC:
+		return true, tea.Quit
+	case key.Type == tea.KeyRunes && (string(key.Runes) == "?" || string(key.Runes) == "q"):
+		return true, dismissPaletteCmd()
+	}
+	return true, nil
+}
+
+func (helpView) Body(width int) string {
+	colWidth := max(20, (width-2)/2)
 	navTitle := style.Bold.Render("Navigation")
 	msgTitle := style.Bold.Render("Messaging")
 	nav := renderHelpColumn(helpSectionNavigation, colWidth)
 	msg := renderHelpColumn(helpSectionMessaging, colWidth)
-	columns := lipgloss.JoinHorizontal(lipgloss.Top, lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{navTitle, nav}, "\n")), "  ", lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{msgTitle, msg}, "\n")))
-	footer := style.Subtle.Render("? or esc to close")
-	body := strings.Join([]string{title, columns, footer}, "\n\n")
-	modal := style.Modal.Width(modalWidth).Padding(1, 2).Render(body)
-	return lipgloss.Place(m.ui.width, m.ui.height, lipgloss.Center, lipgloss.Center, modal,
-		lipgloss.WithWhitespaceBackground(style.BackdropTint))
+	return lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{navTitle, nav}, "\n")),
+		"  ",
+		lipgloss.NewStyle().Width(colWidth).Render(strings.Join([]string{msgTitle, msg}, "\n")),
+	)
 }
+
+func (helpView) Subtitle() string { return "Keyboard shortcuts for navigation and messaging." }
+
+func (helpView) Footer() string { return "? or esc to close" }
 
 func renderHelpColumn(entries []helpShortcut, width int) string {
 	keyWidth := 0

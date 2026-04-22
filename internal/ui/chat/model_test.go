@@ -1759,25 +1759,28 @@ func TestRenderMessagesUsesLocalTimezoneForHeaders(t *testing.T) {
 func TestHelpOverlayTogglesWithQuestionMark(t *testing.T) {
 	model := newHelpTestModel(t)
 
-	// "?" with empty input opens the overlay.
-	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	if !model.helpOpen {
-		t.Fatal("expected ? to open the help overlay")
+	// "?" with empty input opens the palette at the Help view.
+	_, cmd := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	drainMsg(t, model, cmd)
+	if !model.commandPalette.open || model.commandPalette.activeViewID() != paletteViewHelp {
+		t.Fatalf("expected ? to open the palette at help, got open=%v path=%v", model.commandPalette.open, model.commandPalette.path)
 	}
 	if !strings.Contains(model.View(), "Help") {
 		t.Fatalf("expected help title in view: %q", model.View())
 	}
 
-	// Esc closes it.
+	// Esc pops Help → Settings; second Esc closes the palette.
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if model.helpOpen {
-		t.Fatal("expected esc to close the help overlay")
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if model.commandPalette.open {
+		t.Fatal("expected repeated esc to close the palette")
 	}
 
 	// Typing "?" in the input while editing a message must not open help.
 	model.input.SetValue("draft")
 	_, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
-	if model.helpOpen {
+	if model.commandPalette.open {
 		t.Fatal("expected ? to be ignored while typing a message")
 	}
 }

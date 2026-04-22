@@ -38,9 +38,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 	if !ok {
 		return false, nil
 	}
-	if m.helpOpen {
-		return true, m.handleHelpKey(keyMsg)
-	}
 	if m.commandPalette.open {
 		action, cmd := m.commandPalette.Update(msg)
 		if action != nil {
@@ -78,22 +75,6 @@ func (m *Model) handleOverlays(msg tea.Msg) (bool, tea.Cmd) {
 		return true, m.handlePeerDetailKey(keyMsg)
 	}
 	return false, nil
-}
-
-// handleHelpKey closes the help overlay on ?, esc, q, or ctrl+c. Every other
-// key is absorbed so the chat input doesn't receive keystrokes meant to
-// dismiss the overlay.
-func (m *Model) handleHelpKey(msg tea.KeyMsg) tea.Cmd {
-	switch {
-	case msg.Type == tea.KeyEsc:
-		m.helpOpen = false
-	case msg.Type == tea.KeyCtrlC:
-		m.helpOpen = false
-		return tea.Quit
-	case msg.Type == tea.KeyRunes && (string(msg.Runes) == "?" || string(msg.Runes) == "q"):
-		m.helpOpen = false
-	}
-	return nil
 }
 
 func (m *Model) handlePeerDetailKey(msg tea.KeyMsg) tea.Cmd {

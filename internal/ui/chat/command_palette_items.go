@@ -384,6 +384,14 @@ func settingsNode() paletteNode {
 					dynamic:  true,
 					children: messageTTLChildren,
 				},
+				{
+					id:      paletteNodeIDHelp,
+					title:   "Help",
+					detail:  "Keyboard shortcuts for navigation and messaging.",
+					meta:    "HELP",
+					aliases: []string{"help", "shortcuts", "keys", "keyboard", "?"},
+					view:    paletteViewHelp,
+				},
 			}
 		},
 	}

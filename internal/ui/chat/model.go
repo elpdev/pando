@@ -48,7 +48,6 @@ type Model struct {
 	contactVerify        contactVerifyModal
 	contactRequests      contactRequestsModal
 	pendingRequestsCount int
-	helpOpen             bool
 	peerDetailOpen       bool
 	unread               map[string]int
 }
@@ -138,6 +137,9 @@ func New(deps Deps) *Model {
 		relayProfiles: func() []config.RelayProfile {
 			return append([]config.RelayProfile(nil), m.relay.profiles...)
 		},
+		resolveView: m.resolvePaletteView,
+		onEnterView: m.enterPaletteView,
+		onExitView:  m.exitPaletteView,
 	})
 	m.addContact = newAddContactModal(addContactDeps{
 		messaging:         deps.Messaging,
@@ -227,6 +229,8 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		if next, cmd := m.handleKeyMsg(msg); next != nil {
 			return next, cmd
 		}
+	case paletteCloseMsg:
+		return m.handlePaletteCloseMsg(msg)
 	case addContactCompletedMsg:
 		return m.handleAddContactCompletedMsg(msg)
 	case addContactClosedMsg:

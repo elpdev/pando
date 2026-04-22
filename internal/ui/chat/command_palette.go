@@ -39,6 +39,7 @@ const (
 	paletteNodeIDEditRelay   = "edit-relay"
 	paletteNodeIDRemoveRelay = "remove-relay"
 	paletteNodeIDTheme       = "theme"
+	paletteNodeIDHelp        = "help"
 	paletteNodeIDMessageTTL  = "message-ttl"
 	paletteNodeIDVoiceNotes  = "voice-notes"
 )
@@ -152,6 +153,24 @@ func (m *commandPaletteModel) Open() tea.Cmd {
 	m.selected = 0
 	m.filter.SetValue("")
 	return m.filter.Focus()
+}
+
+// OpenAtPath opens the palette and jumps straight to the node at the given id
+// path. If the path points to a view node, the view's Open hook is triggered
+// via deps.onEnterView. Used by hotkeys that open a specific palette view
+// (e.g. `?` opens Settings › Help).
+func (m *commandPaletteModel) OpenAtPath(path []string) tea.Cmd {
+	m.open = true
+	m.path = append(m.path[:0], path...)
+	m.selected = 0
+	m.filter.SetValue("")
+	cmd := m.filter.Focus()
+	if id := m.activeViewID(); id != paletteViewNone && m.deps.onEnterView != nil {
+		if enterCmd := m.deps.onEnterView(id); enterCmd != nil {
+			return tea.Batch(cmd, enterCmd)
+		}
+	}
+	return cmd
 }
 
 func (m *commandPaletteModel) SyncContext(hasPeer bool, pendingRequestsCount int, voiceNotes []voiceNoteOption, voicePlaybackActive bool) {

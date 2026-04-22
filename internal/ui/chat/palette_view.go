@@ -42,20 +42,21 @@ type viewOpenCtx struct {
 	peerFingerprint string
 }
 
-// viewCompleteMsg is dispatched by a view when it has finished successfully
-// (e.g., a contact was imported). The Model responds by closing the palette
-// entirely and surfacing any toast the view wants to display.
-type viewCompleteMsg struct {
-	id    paletteViewID
-	toast string
+// paletteCloseMsg asks the Model to close the palette entirely — used both
+// when a view finishes successfully (set toast to show a confirmation) and
+// when a view wants to dismiss itself without error (empty toast).
+type paletteCloseMsg struct {
+	toast     string
+	toastKind ToastLevel
 }
 
-// enterViewCmd returns a Bubble Tea command the palette issues when activating
-// a view node. The Model intercepts this message and invokes the view's Open.
-func enterViewCmd(id paletteViewID) tea.Cmd {
-	return func() tea.Msg { return enterViewMsg{id: id} }
+// dismissPaletteCmd fires paletteCloseMsg with no toast — the view wants to
+// close the palette silently.
+func dismissPaletteCmd() tea.Cmd {
+	return func() tea.Msg { return paletteCloseMsg{} }
 }
 
-type enterViewMsg struct {
-	id paletteViewID
+// completePaletteCmd fires paletteCloseMsg with a success toast.
+func completePaletteCmd(toast string, kind ToastLevel) tea.Cmd {
+	return func() tea.Msg { return paletteCloseMsg{toast: toast, toastKind: kind} }
 }

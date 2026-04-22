@@ -13,8 +13,7 @@ import (
 
 func (m *Model) handleKeyMsg(msg tea.KeyMsg) (*Model, tea.Cmd) {
 	if msg.Type == tea.KeyRunes && string(msg.Runes) == "?" && m.input.Value() == "" {
-		m.helpOpen = true
-		return m, nil
+		return m, m.openPaletteAtHelp()
 	}
 	if msg.Type == tea.KeyEsc && m.pending != nil && m.ui.focus == focusChat {
 		m.clearPendingAttachment()
