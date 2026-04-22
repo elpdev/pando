@@ -3,6 +3,7 @@ package chat
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/elpdev/pando/internal/identity"
@@ -169,6 +170,7 @@ func (m *Model) renderConversation() string {
 		m.renderViewport(),
 		m.renderJumpPill(width),
 		m.renderToast(),
+		m.renderRecordingStatus(width),
 		m.renderPendingAttachment(width),
 		m.renderComposer(width),
 	}
@@ -211,8 +213,33 @@ func (m *Model) renderPendingAttachment(width int) string {
 	return style.InputBorder.Width(inner).Padding(0, 1).Render(line)
 }
 
+func (m *Model) renderRecordingStatus(width int) string {
+	if !m.recording.active {
+		return ""
+	}
+	label := fmt.Sprintf("RECORDING %s", formatRecordingDuration(m.RecordingDuration(time.Now().UTC())))
+	controls := style.Muted.Render("enter stop  esc cancel")
+	inner := max(1, width-2)
+	pad := inner - lipgloss.Width(label) - lipgloss.Width(controls) - 2
+	if pad < 1 {
+		pad = 1
+	}
+	line := style.StatusBad.Bold(true).Render(label) + strings.Repeat(" ", pad) + controls
+	return style.InputBorder.Width(inner).Padding(0, 1).Render(line)
+}
+
 func (m *Model) renderComposer(width int) string {
 	return style.InputBorder.Width(max(1, width-2)).Padding(0, 1).Render(m.input.View())
+}
+
+func formatRecordingDuration(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	seconds := int(d.Round(time.Second).Seconds())
+	minutes := seconds / 60
+	seconds %= 60
+	return fmt.Sprintf("%02d:%02d", minutes, seconds)
 }
 
 func joinNonEmpty(parts ...string) string {

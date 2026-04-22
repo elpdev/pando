@@ -34,21 +34,32 @@ func (m *Model) queuePendingAttachment(path, prefix string) error {
 }
 
 func (m *Model) setPendingAttachment(path, kind string) error {
+	return m.setPendingAttachmentWithCleanup(path, kind, nil)
+}
+
+func (m *Model) setPendingAttachmentWithCleanup(path, kind string, cleanup func()) error {
 	info, err := fileInfo(path)
 	if err != nil {
 		return err
 	}
+	if m.pending != nil && m.pending.cleanup != nil {
+		m.pending.cleanup()
+	}
 	m.pending = &pendingAttachment{
-		path: path,
-		kind: kind,
-		name: info.name,
-		size: info.size,
+		path:    path,
+		kind:    kind,
+		name:    info.name,
+		size:    info.size,
+		cleanup: cleanup,
 	}
 	m.pushToast(fmt.Sprintf("queued %s", info.name), ToastInfo)
 	return nil
 }
 
 func (m *Model) clearPendingAttachment() {
+	if m.pending != nil && m.pending.cleanup != nil {
+		m.pending.cleanup()
+	}
 	m.pending = nil
 }
 

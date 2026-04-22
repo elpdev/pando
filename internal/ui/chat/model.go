@@ -20,18 +20,20 @@ import (
 )
 
 type Model struct {
-	client      transport.Client
-	messaging   *messaging.Service
-	voicePlayer VoicePlayer
-	mailbox     string
+	client        transport.Client
+	messaging     *messaging.Service
+	voicePlayer   VoicePlayer
+	voiceRecorder VoiceRecorder
+	mailbox       string
 
-	relay    relayState
-	peer     peerState
-	conn     connectionState
-	msgs     messageState
-	typing   typingState
-	roomSync roomSyncState
-	ui       uiState
+	relay     relayState
+	peer      peerState
+	conn      connectionState
+	msgs      messageState
+	typing    typingState
+	recording recordingState
+	roomSync  roomSyncState
+	ui        uiState
 
 	input    textarea.Model
 	viewport viewport.Model
@@ -89,10 +91,11 @@ func New(deps Deps) *Model {
 	profiles := append([]config.RelayProfile(nil), deps.RelayProfiles...)
 	active := relayProfileName(profiles, deps.RelayURL, deps.RelayToken)
 	m := &Model{
-		client:      deps.Client,
-		messaging:   deps.Messaging,
-		voicePlayer: deps.VoicePlayer,
-		mailbox:     deps.Mailbox,
+		client:        deps.Client,
+		messaging:     deps.Messaging,
+		voicePlayer:   deps.VoicePlayer,
+		voiceRecorder: deps.VoiceRecorder,
+		mailbox:       deps.Mailbox,
 		relay: relayState{
 			url:              deps.RelayURL,
 			token:            deps.RelayToken,
@@ -117,6 +120,9 @@ func New(deps Deps) *Model {
 	}
 	if m.voicePlayer == nil {
 		m.voicePlayer = audio.NewPlayer()
+	}
+	if m.voiceRecorder == nil {
+		m.voiceRecorder = audio.NewRecorder()
 	}
 	m.commandPalette = newCommandPaletteModel(commandPaletteDeps{
 		applyTheme: style.Apply,
@@ -285,6 +291,12 @@ func (m *Model) Update(msg tea.Msg) (*Model, tea.Cmd) {
 		return m.handleSendResultMsg(msg)
 	case voicePlaybackResultMsg:
 		return m.handleVoicePlaybackResultMsg(msg)
+	case voiceRecordingStartedMsg:
+		return m.handleVoiceRecordingStartedMsg(msg)
+	case voiceRecordingStoppedMsg:
+		return m.handleVoiceRecordingStoppedMsg(msg)
+	case voiceRecordingCanceledMsg:
+		return m.handleVoiceRecordingCanceledMsg(msg)
 	case typingSendResultMsg:
 		return m.handleTypingSendResultMsg(msg)
 	case roomHistorySyncResultMsg:
@@ -319,6 +331,15 @@ func (m *Model) pushToast(text string, level ToastLevel) {
 }
 
 func (m *Model) Close() error {
+	if m.voiceRecorder != nil {
+		if err := m.voiceRecorder.Close(); err != nil {
+			if m.voicePlayer != nil {
+				_ = m.voicePlayer.Close()
+			}
+			_ = m.client.Close()
+			return err
+		}
+	}
 	if m.voicePlayer != nil {
 		if err := m.voicePlayer.Close(); err != nil {
 			_ = m.client.Close()

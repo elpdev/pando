@@ -9,7 +9,7 @@ import (
 )
 
 func (m *Model) openCommandPalette() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount, m.recentVoiceNotes(), m.voicePlayer != nil && m.voicePlayer.IsPlaying())
+	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount, m.recentVoiceNotes(), m.recording.active, m.voicePlayer != nil && m.voicePlayer.IsPlaying())
 	m.input.Blur()
 	return m.commandPalette.Open()
 }
@@ -18,6 +18,12 @@ func (m *Model) handleCommandPaletteAction(action commandPaletteAction) tea.Cmd 
 	switch action.command {
 	case commandPaletteCommandAttachFile:
 		return m.handleAttachKey()
+	case commandPaletteCommandRecordVoiceNote:
+		return m.startVoiceRecordingCmd()
+	case commandPaletteCommandStopRecording:
+		return m.stopVoiceRecordingCmd()
+	case commandPaletteCommandCancelRecording:
+		return m.cancelVoiceRecordingCmd()
 	case commandPaletteCommandThemes:
 		return m.applyPaletteTheme(action.themeName)
 	case commandPaletteCommandSwitchRelay:

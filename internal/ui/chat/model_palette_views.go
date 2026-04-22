@@ -52,7 +52,7 @@ func (m *Model) exitPaletteView(id paletteViewID) {
 // openPaletteAtHelp opens the command palette and lands directly on the Help
 // view, preserving the Settings › Help breadcrumb so Esc returns to Settings.
 func (m *Model) openPaletteAtHelp() tea.Cmd {
-	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount, m.recentVoiceNotes(), m.voicePlayer != nil && m.voicePlayer.IsPlaying())
+	m.commandPalette.SyncContext(m.peer.mailbox != "", m.pendingRequestsCount, m.recentVoiceNotes(), m.recording.active, m.voicePlayer != nil && m.voicePlayer.IsPlaying())
 	m.input.Blur()
 	return m.commandPalette.OpenAtPath([]string{paletteNodeIDSettings, paletteNodeIDHelp})
 }
