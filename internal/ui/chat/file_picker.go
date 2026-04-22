@@ -137,7 +137,7 @@ func (m filePickerModel) Update(msg tea.Msg) (filePickerModel, tea.Cmd) {
 	}
 }
 
-func (m filePickerModel) View() string {
+func (m filePickerModel) View(base string) string {
 	bodyWidth := max(1, paletteWidth(m.width)-6)
 	filterBox := style.PaletteInput.Width(bodyWidth).Padding(0, 1).Render(m.filter.View())
 	lines := []string{style.PaletteMeta.Width(bodyWidth).Render(m.dir), filterBox}
@@ -165,7 +165,7 @@ func (m filePickerModel) View() string {
 	if strings.TrimSpace(m.filter.Value()) == "" {
 		footer = "type to filter · up/down browse · enter open or select · backspace up · esc cancel"
 	}
-	return renderPaletteOverlay(m.width, max(1, m.height), "Attach File", "Browse locally and queue one attachment.", []string{strings.Join(lines, "\n")}, footer)
+	return renderFloatingPaletteOverlay(base, m.width, max(1, m.height), "Attach File", "Browse locally and queue one attachment.", []string{strings.Join(lines, "\n")}, footer)
 }
 
 func (m *filePickerModel) openAt(dir string) error {

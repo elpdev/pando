@@ -1257,7 +1257,7 @@ func TestFilePickerFiltersEntriesFromTypedQuery(t *testing.T) {
 	if len(filtered) != 1 || filtered[0].Name != "draft.txt" {
 		t.Fatalf("expected only draft.txt after filtering, got %+v", filtered)
 	}
-	view := model.filePicker.View()
+	view := model.filePicker.View("")
 	if !strings.Contains(view, "draft.txt") {
 		t.Fatalf("expected filtered view to show draft.txt: %q", view)
 	}

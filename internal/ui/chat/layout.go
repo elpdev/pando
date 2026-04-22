@@ -73,7 +73,7 @@ func (m *Model) updateLayout() {
 		m.viewport.Width = max(1, m.ui.width)
 		m.viewport.Height = max(1, m.ui.height-extraRows)
 		m.syncComposer()
-		m.filePicker.SetSize(m.conversationWidth(), m.ui.height)
+		m.filePicker.SetSize(m.ui.width, m.ui.height)
 		return
 	}
 	sidebarWidth := 28
@@ -88,7 +88,7 @@ func (m *Model) updateLayout() {
 	m.viewport.Width = conversationWidth
 	m.viewport.Height = max(1, m.ui.height-extraRows)
 	m.syncComposer()
-	m.filePicker.SetSize(conversationWidth, m.ui.height)
+	m.filePicker.SetSize(m.ui.width, m.ui.height)
 }
 
 func (m *Model) conversationWidth() int {
